@@ -37,3 +37,7 @@ Codex limits are read from the latest local Codex session JSONL file containing 
 
 - `/copilot_internal/user` is not a public documented API and could change without notice.
 - The pace calculation assumes a monthly reset cycle starting one calendar month before the reported reset date, which is accurate for standard GitHub Copilot business/enterprise billing but may not match unusual cycles.
+
+## License
+
+[MIT](LICENSE)
