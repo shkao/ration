@@ -12,9 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # SC2034: OVERAGE_PERMITTED is parsed from the API but intentionally unused
       - name: shellcheck
-        run: shellcheck --exclude=SC2034 quotapace.5m.sh install.sh helpers/quotapace-login.sh tests/run.sh
+        run: shellcheck quotapace.5m.sh install.sh helpers/quotapace-login.sh tests/run.sh
       - name: bash syntax
         run: bash -n quotapace.5m.sh install.sh helpers/quotapace-login.sh tests/run.sh
 

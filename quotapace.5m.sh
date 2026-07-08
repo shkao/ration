@@ -140,6 +140,26 @@ AGY_STATE="absent" # absent (CLI not installed) | ok | error
 AGY_ROWS=""        # one group per line: label, used%, reset epoch, elapsed%
 AGY_EMAIL=""
 AGY_ASOF=""
+# One jq pass over a snapshot: email on the first line, then one TSV row per
+# quota group. Empty output means the payload isn't a usable snapshot.
+# Weekly rolling window: elapsed = share of the 7 days already gone.
+parse_antigravity() {
+  "$JQ_BIN" -r '
+    select((.models | length) > 0)
+    | (.email // ""),
+      (.models
+       | map(select(.isAutocompleteOnly | not))
+       | [["Gemini", map(select(.modelId | startswith("gemini")))],
+          ["Claude+GPT", map(select(.modelId | test("^(claude|gpt)")))]][]
+       | select(.[1] | length > 0)
+       | [.[0],
+          ((1 - .[1][0].remainingPercentage) * 100),
+          (.[1][0].resetTime | fromdate),
+          ((604800000 - .[1][0].timeUntilResetMs) / 604800000 * 100
+           | if . < 0 then 0 elif . > 100 then 100 else . end)]
+       | @tsv)' 2>/dev/null
+}
+
 fetch_antigravity() {
   local agy_bin
   agy_bin="${QUOTAPACE_AGY-$(command -v antigravity-usage)}"
@@ -148,15 +168,20 @@ fetch_antigravity() {
     # shellcheck disable=SC2012
     agy_bin="$(ls -t "$HOME"/.nvm/versions/node/*/bin/antigravity-usage 2>/dev/null | head -1)"
   fi
-  [[ -z "$agy_bin" || -z "$JQ_BIN" ]] && return 0
+  [[ -z "$agy_bin" ]] && return 0
 
-  local agy_cache="${CACHE_DIR}/antigravity.json" json
+  local agy_cache="${CACHE_DIR}/antigravity.json" json parsed=""
   json="$("$agy_bin" --json 2>/dev/null)"
-  if [[ -n "$json" ]] && echo "$json" | "$JQ_BIN" -e '.models | length > 0' >/dev/null 2>&1; then
+  [[ -n "$json" ]] && parsed="$(parse_antigravity <<< "$json")"
+  if [[ -n "$parsed" ]]; then
     mkdir -p "$CACHE_DIR" 2>/dev/null
     printf '%s\n' "$json" > "${agy_cache}.tmp" 2>/dev/null && mv -f "${agy_cache}.tmp" "$agy_cache" 2>/dev/null
   elif [[ -s "$agy_cache" ]]; then
-    json="$(cat "$agy_cache")"
+    parsed="$(parse_antigravity < "$agy_cache")"
+    if [[ -z "$parsed" ]]; then
+      AGY_STATE="error"
+      return 0
+    fi
     AGY_ASOF="$(date -r "$agy_cache" "+%-d %b %H:%M")"
   else
     AGY_STATE="error"
@@ -164,20 +189,9 @@ fetch_antigravity() {
   fi
 
   AGY_STATE="ok"
-  AGY_EMAIL="$(echo "$json" | "$JQ_BIN" -r '.email // empty' 2>/dev/null)"
-  # Weekly rolling window: elapsed = share of the 7 days already gone.
-  AGY_ROWS="$(echo "$json" | "$JQ_BIN" -r '
-    .models
-    | map(select(.isAutocompleteOnly | not))
-    | [["Gemini", map(select(.modelId | startswith("gemini")))],
-       ["Claude+GPT", map(select(.modelId | test("^(claude|gpt)")))]][]
-    | select(.[1] | length > 0)
-    | [.[0],
-       ((1 - .[1][0].remainingPercentage) * 100),
-       (.[1][0].resetTime | fromdate),
-       ((604800000 - .[1][0].timeUntilResetMs) / 604800000 * 100
-        | if . < 0 then 0 elif . > 100 then 100 else . end)]
-    | @tsv' 2>/dev/null)"
+  AGY_EMAIL="${parsed%%$'\n'*}"
+  AGY_ROWS=""
+  [[ "$parsed" == *$'\n'* ]] && AGY_ROWS="${parsed#*$'\n'}"
 }
 
 print_antigravity_section() {
@@ -201,38 +215,50 @@ print_antigravity_section() {
   [[ -n "$note" ]] && echo "${note} | size=11 color=${SECONDARY_COLOR}"
 }
 
+# Shared chrome for full-menu (takeover) screens: menu bar glyph, app header,
+# headline, optional extra lines, refresh action. Callers pass complete
+# SwiftBar lines; this owns only the skeleton around them.
+print_takeover_menu() {
+  local title="$1" headline="$2"
+  shift 2
+  echo "$title"
+  echo "---"
+  echo "QuotaPace | size=13"
+  echo "$headline"
+  local line
+  for line in "$@"; do
+    echo "$line"
+  done
+  echo "---"
+  echo "Refresh | refresh=true sfimage=arrow.clockwise"
+}
+
+signin_item() {
+  echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
+}
+
 # jq parses every provider's output, so it stays a hard requirement. gh is
 # only needed for Copilot; its absence just means that provider isn't shown.
 if [[ -z "$JQ_BIN" ]]; then
-  echo "?"
-  echo "---"
-  echo "QuotaPace | size=13"
-  echo "Missing dependencies: jq | color=${RED} size=12"
-  echo "brew install jq | font=Menlo size=11 color=${SECONDARY_COLOR}"
-  echo "---"
-  echo "Refresh | refresh=true sfimage=arrow.clockwise"
+  print_takeover_menu "?" \
+    "Missing dependencies: jq | color=${RED} size=12" \
+    "brew install jq | font=Menlo size=11 color=${SECONDARY_COLOR}"
   exit 0
 fi
 
 # One-click recovery path instead of a dead-end error.
 print_signin_menu() {
   local headline="$1"
-  echo "? | sfimage=person.crop.circle.badge.exclamationmark sfcolor=#e74c3c"
-  echo "---"
-  echo "QuotaPace | size=13"
-  echo "${headline} | color=${RED} size=12"
-  echo "---"
+  local -a extras=("---")
   if [[ -x "$LOGIN_SCRIPT" ]]; then
-    echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
-    echo "Opens a one-time code in your browser | size=10 color=${SECONDARY_COLOR}"
+    extras+=("$(signin_item)" "Opens a one-time code in your browser | size=10 color=${SECONDARY_COLOR}")
   else
     # install.sh wasn't run, so the login helper isn't available — a dead
     # menu item would be worse than pointing at the terminal command.
-    echo "Run in a terminal: | size=12"
-    echo "gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
+    extras+=("Run in a terminal: | size=12" "gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}")
   fi
-  echo "---"
-  echo "Refresh | refresh=true sfimage=arrow.clockwise"
+  print_takeover_menu "? | sfimage=person.crop.circle.badge.exclamationmark sfcolor=#e74c3c" \
+    "${headline} | color=${RED} size=12" "${extras[@]}"
 }
 
 # GitHub Copilot quota via `gh api`. Detection rule: the provider counts as
@@ -242,6 +268,9 @@ print_signin_menu() {
 CP_STATE="absent" # absent | ok | offline | signedout | expired | nocopilot | unreachable | badresponse
 CP_ERR=""
 OFFLINE_ASOF=""
+# Single home for state copy rendered both as a section line and a takeover menu.
+CP_MSG_UNREACHABLE="GitHub is unreachable and no cached data yet"
+CP_MSG_BADRESPONSE="Unexpected response from Copilot API"
 fetch_copilot() {
   [[ -z "$GH_BIN" ]] && return 0
 
@@ -284,14 +313,13 @@ fetch_copilot() {
 compute_copilot() {
 # IFS must be a tab: fields like the org name can contain spaces, and default
 # word splitting would shift every field after them.
-IFS=$'\t' read -r LOGIN REMAINING ENTITLEMENT PERCENT_REMAINING OVERAGE_PERMITTED RESET_UTC PLAN ORG <<EOF
+IFS=$'\t' read -r LOGIN REMAINING ENTITLEMENT PERCENT_REMAINING RESET_UTC PLAN ORG <<EOF
 $(echo "$RESPONSE" | "$JQ_BIN" -r '
   [
     .login,
     .quota_snapshots.premium_interactions.quota_remaining,
     .quota_snapshots.premium_interactions.entitlement,
     .quota_snapshots.premium_interactions.percent_remaining,
-    .quota_snapshots.premium_interactions.overage_permitted,
     .quota_reset_date_utc,
     .copilot_plan,
     (.organization_list[0].name // "personal")
@@ -329,7 +357,7 @@ else
 fi
 
 PERCENT_TITLE="$(printf '%.0f' "$ACTUAL_USED_PCT")"
-RESET_LOCAL="$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$RESET_CLEAN" "+%b %d" 2>/dev/null)"
+# format_reset always yields text ("unknown" when the epoch is unparsable).
 RESET_DISPLAY="$(format_reset "$EPOCH_END")"
 
 # Menu bar color + status, based on pace (usage rate vs. time elapsed in the month)
@@ -363,7 +391,7 @@ print_copilot_section() {
       # already elapsed. Fill past the tick means burning faster than time
       # passes. Tick is skipped when the billing period couldn't be derived.
       print_limit_line "Monthly" "$ACTUAL_USED_PCT" "$COLOR" "$ELAPSED_PCT"
-      echo "Resets ${RESET_DISPLAY:-${RESET_LOCAL:-$RESET_UTC}} · $(printf '%.0f' "$REMAINING") of ${ENTITLEMENT} left | size=11 color=${SECONDARY_COLOR}"
+      echo "Resets ${RESET_DISPLAY} · $(printf '%.0f' "$REMAINING") of ${ENTITLEMENT} left | size=11 color=${SECONDARY_COLOR}"
       echo "${LOGIN} · ${PLAN} (${ORG}) | size=11 color=${SECONDARY_COLOR}"
       ;;
     signedout | expired)
@@ -371,16 +399,16 @@ print_copilot_section() {
       [[ "$CP_STATE" == "expired" ]] && headline="GitHub sign-in expired"
       echo "${headline} | size=11 color=${ORANGE}"
       if [[ -x "$LOGIN_SCRIPT" ]]; then
-        echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
+        signin_item
       else
         echo "gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
       fi
       ;;
     unreachable)
-      echo "GitHub is unreachable and no cached data yet | size=11 color=${ORANGE}"
+      echo "${CP_MSG_UNREACHABLE} | size=11 color=${ORANGE}"
       ;;
     badresponse)
-      echo "Unexpected response from Copilot API | size=11 color=${ORANGE}"
+      echo "${CP_MSG_BADRESPONSE} | size=11 color=${ORANGE}"
       echo "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
       ;;
   esac
@@ -388,21 +416,15 @@ print_copilot_section() {
 
 # First-run guidance when no provider is detected at all.
 print_welcome_menu() {
-  echo "? | size=12.5"
-  echo "---"
-  echo "QuotaPace | size=13"
-  echo "No AI quota sources detected | color=${ORANGE} size=12"
-  echo "---"
-  echo "For GitHub Copilot: | size=12"
-  if [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]]; then
-    echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
-  else
-    echo "brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
-  fi
-  echo "For Antigravity: | size=12"
-  echo "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}"
-  echo "---"
-  echo "Refresh | refresh=true sfimage=arrow.clockwise"
+  local copilot_hint="brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
+  [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]] && copilot_hint="$(signin_item)"
+  print_takeover_menu "? | size=12.5" \
+    "No AI quota sources detected | color=${ORANGE} size=12" \
+    "---" \
+    "For GitHub Copilot: | size=12" \
+    "$copilot_hint" \
+    "For Antigravity: | size=12" \
+    "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}"
 }
 
 fetch_copilot
@@ -427,34 +449,22 @@ if [[ "$AGY_STATE" != "ok" ]]; then
       ;;
     nocopilot)
       # Sign-in wouldn't fix a missing seat, so point at Copilot settings.
-      echo "? | sfimage=exclamationmark.shield sfcolor=#e67e22"
-      echo "---"
-      echo "QuotaPace | size=13"
-      echo "GitHub Copilot isn't enabled for this account | color=${ORANGE} size=12"
-      echo "---"
-      echo "Open Copilot settings | href=https://github.com/settings/copilot color=${BLUE} size=12 sfimage=gearshape"
-      echo "---"
-      echo "Refresh | refresh=true sfimage=arrow.clockwise"
+      print_takeover_menu "? | sfimage=exclamationmark.shield sfcolor=#e67e22" \
+        "GitHub Copilot isn't enabled for this account | color=${ORANGE} size=12" \
+        "---" \
+        "Open Copilot settings | href=https://github.com/settings/copilot color=${BLUE} size=12 sfimage=gearshape"
       exit 0
       ;;
     unreachable)
-      echo "? | sfimage=wifi.slash sfcolor=#e67e22"
-      echo "---"
-      echo "QuotaPace | size=13"
-      echo "GitHub is unreachable and no cached data yet | color=${ORANGE} size=12"
-      echo "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
-      echo "---"
-      echo "Refresh | refresh=true sfimage=arrow.clockwise"
+      print_takeover_menu "? | sfimage=wifi.slash sfcolor=#e67e22" \
+        "${CP_MSG_UNREACHABLE} | color=${ORANGE} size=12" \
+        "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
       exit 0
       ;;
     badresponse)
-      echo "?"
-      echo "---"
-      echo "QuotaPace | size=13"
-      echo "Unexpected response from Copilot API | color=${RED} size=12"
-      echo "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
-      echo "---"
-      echo "Refresh | refresh=true sfimage=arrow.clockwise"
+      print_takeover_menu "?" \
+        "${CP_MSG_BADRESPONSE} | color=${RED} size=12" \
+        "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
       exit 0
       ;;
     absent)
@@ -479,9 +489,10 @@ if [[ "$AGY_STATE" == "ok" ]]; then
   while IFS=$'\t' read -r AGY_LABEL AGY_USED _ AGY_ELAPSED; do
     [[ -z "$AGY_LABEL" ]] && continue
     AGY_COLOR="$(pace_color "$AGY_USED" "$AGY_ELAPSED")"
-    if (( $(color_rank "$AGY_COLOR") > $(color_rank "$HEADER_COLOR") )); then
+    AGY_RANK="$(color_rank "$AGY_COLOR")"
+    if (( AGY_RANK > $(color_rank "$HEADER_COLOR") )); then
       HEADER_COLOR="$AGY_COLOR"
-      case "$(color_rank "$AGY_COLOR")" in
+      case "$AGY_RANK" in
         3) HEADER_STATUS="Antigravity ${AGY_LABEL} burning fast" ;;
         2) HEADER_STATUS="Antigravity ${AGY_LABEL} over pace" ;;
         1) HEADER_STATUS="Antigravity ${AGY_LABEL} slightly over pace" ;;

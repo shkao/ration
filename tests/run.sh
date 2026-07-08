@@ -53,6 +53,17 @@ make_agy() {
   chmod +x "$AGY_STUB"
 }
 
+# The two most common stub setups, factored from repeated call sites.
+make_gh_ok() {
+  make_gh "echo '$(copilot_json "${1:-75}" "${2:-750}")'; exit 0"
+}
+
+make_agy_json() {
+  make_agy "cat <<'JSON'
+$(agy_json)
+JSON"
+}
+
 # Run the plugin with the seams pointed at the stubs. Extra VAR=value
 # arguments go last so they override the defaults (`env` lets the final
 # assignment win).
@@ -116,8 +127,7 @@ copilot_json() {
     "premium_interactions": {
       "quota_remaining": ${remaining},
       "entitlement": 1000,
-      "percent_remaining": ${percent_remaining},
-      "overage_permitted": false
+      "percent_remaining": ${percent_remaining}
     }
   }
 }
@@ -158,7 +168,7 @@ seed_agy_cache() {
 # ---------------------------------------------------------------------------
 
 begin "happy path renders usage, pace, and account"
-make_gh "echo '$(copilot_json 75 750)'; exit 0"
+make_gh_ok
 run_plugin
 expect_contains "25% | size=12.5"
 expect_contains "● On pace"
@@ -168,7 +178,7 @@ expect_contains "octocat · business (Acme Corp)"
 expect_not_contains "Antigravity"
 
 begin "heavy usage escalates to burning fast"
-make_gh "echo '$(copilot_json 10 100)'; exit 0"
+make_gh_ok 10 100
 run_plugin
 expect_contains "● Burning fast — may run out before reset"
 expect_contains "90% used"
@@ -176,7 +186,7 @@ expect_contains "90% used"
 expect_contains "90% | size=12.5 color="
 
 begin "happy path writes the offline cache"
-make_gh "echo '$(copilot_json 75 750)'; exit 0"
+make_gh_ok
 run_plugin
 if [[ -s "$FAKE_HOME/Library/Caches/quotapace/quota.json" ]]; then
   PASS=$((PASS + 1))
@@ -235,10 +245,8 @@ expect_contains "Missing dependencies: jq"
 expect_contains "brew install jq"
 
 begin "antigravity section renders groups with pace ticks"
-make_gh "echo '$(copilot_json 75 750)'; exit 0"
-make_agy "cat <<'JSON'
-$(agy_json)
-JSON"
+make_gh_ok
+make_agy_json
 run_plugin
 expect_contains "**Antigravity**"
 # 60% used, tick at 50% of the week: fill 10 of 16 cells, tick at cell 8.
@@ -249,23 +257,21 @@ expect_contains "octocat@example.com"
 expect_contains "● Antigravity Gemini slightly over pace"
 
 begin "antigravity CLI failure falls back to its cache"
-make_gh "echo '$(copilot_json 75 750)'; exit 0"
+make_gh_ok
 make_agy "exit 1"
 seed_agy_cache
 run_plugin
 expect_contains "octocat@example.com · cached from"
 
 begin "antigravity CLI failure without cache degrades to one line"
-make_gh "echo '$(copilot_json 75 750)'; exit 0"
+make_gh_ok
 make_agy "exit 1"
 run_plugin
 expect_contains "Quota unavailable · try: antigravity-usage doctor"
 
 begin "antigravity alone works without gh installed"
 GH_STUB=""
-make_agy "cat <<'JSON'
-$(agy_json)
-JSON"
+make_agy_json
 run_plugin
 # Title falls back to the busiest Antigravity group.
 expect_contains "60% | size=12.5"
@@ -275,9 +281,7 @@ expect_not_contains "Open Copilot settings"
 
 begin "no Copilot seat hides the section when Antigravity has data"
 make_gh "echo 'HTTP 403: forbidden'; exit 1"
-make_agy "cat <<'JSON'
-$(agy_json)
-JSON"
+make_agy_json
 run_plugin
 expect_contains "**Antigravity**"
 expect_not_contains "**Copilot**"
@@ -285,9 +289,7 @@ expect_not_contains "isn't enabled"
 
 begin "expired sign-in shrinks to a section line when Antigravity has data"
 make_gh "echo 'HTTP 401: Bad credentials'; exit 1"
-make_agy "cat <<'JSON'
-$(agy_json)
-JSON"
+make_agy_json
 run_plugin
 expect_contains "**Copilot**"
 expect_contains "GitHub sign-in expired"
