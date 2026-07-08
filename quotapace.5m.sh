@@ -1,6 +1,6 @@
 #!/bin/bash
 # <xbar.title>QuotaPace</xbar.title>
-# <xbar.version>v2.4</xbar.version>
+# <xbar.version>v2.5</xbar.version>
 # <xbar.author>Allen Kao</xbar.author>
 # <xbar.author.github>shkao</xbar.author.github>
 # <xbar.desc>Tracks GitHub Copilot and Google Antigravity quota pace</xbar.desc>
@@ -201,15 +201,14 @@ print_antigravity_section() {
   [[ -n "$note" ]] && echo "${note} | size=11 color=${SECONDARY_COLOR}"
 }
 
-if [[ -z "$GH_BIN" || -z "$JQ_BIN" ]]; then
-  MISSING=()
-  [[ -z "$GH_BIN" ]] && MISSING+=("gh")
-  [[ -z "$JQ_BIN" ]] && MISSING+=("jq")
+# jq parses every provider's output, so it stays a hard requirement. gh is
+# only needed for Copilot; its absence just means that provider isn't shown.
+if [[ -z "$JQ_BIN" ]]; then
   echo "?"
   echo "---"
   echo "QuotaPace | size=13"
-  echo "Missing dependencies: ${MISSING[*]} | color=${RED} size=12"
-  echo "brew install ${MISSING[*]} | font=Menlo size=11 color=${SECONDARY_COLOR}"
+  echo "Missing dependencies: jq | color=${RED} size=12"
+  echo "brew install jq | font=Menlo size=11 color=${SECONDARY_COLOR}"
   echo "---"
   echo "Refresh | refresh=true sfimage=arrow.clockwise"
   exit 0
@@ -236,50 +235,53 @@ print_signin_menu() {
   echo "Refresh | refresh=true sfimage=arrow.clockwise"
 }
 
-# `gh auth token` only reads local credentials; `gh auth status` hits the
-# network, so it would misreport "not signed in" whenever the machine is offline.
-if ! "$GH_BIN" auth token >/dev/null 2>&1; then
-  print_signin_menu "Not signed in to GitHub"
-  exit 0
-fi
-
-RESPONSE="$("$GH_BIN" api /copilot_internal/user 2>&1)"
-API_EXIT=$?
+# GitHub Copilot quota via `gh api`. Detection rule: the provider counts as
+# "in use" when gh is installed and signed in, or when a previous run left a
+# cache (so a signed-out Copilot user gets a re-login prompt instead of a
+# silently vanished section). No gh, no token, no cache: no Copilot section.
+CP_STATE="absent" # absent | ok | offline | signedout | expired | nocopilot | unreachable | badresponse
+CP_ERR=""
 OFFLINE_ASOF=""
-if [[ $API_EXIT -ne 0 ]]; then
-  if echo "$RESPONSE" | grep -q "HTTP 401"; then
-    # The local token exists but GitHub rejected it — only here is re-login the fix.
-    print_signin_menu "GitHub sign-in expired"
-    exit 0
-  elif echo "$RESPONSE" | grep -qE "HTTP (403|404)"; then
-    # Signed in to GitHub, but this account/org has no Copilot access — sign-in
-    # wouldn't fix this, so point at Copilot settings instead of a login action.
-    echo "? | sfimage=exclamationmark.shield sfcolor=#e67e22"
-    echo "---"
-    echo "QuotaPace | size=13"
-    echo "GitHub Copilot isn't enabled for this account | color=${ORANGE} size=12"
-    echo "---"
-    echo "Open Copilot settings | href=https://github.com/settings/copilot color=${BLUE} size=12 sfimage=gearshape"
-    echo "---"
-    echo "Refresh | refresh=true sfimage=arrow.clockwise"
-    exit 0
-  elif [[ -s "$CACHE_FILE" ]]; then
-    # Network trouble (offline, DNS, GitHub down): render the last good
-    # snapshot instead of an error; the cache mtime is when it was fetched.
-    RESPONSE="$(cat "$CACHE_FILE")"
-    OFFLINE_ASOF="$(date -r "$CACHE_FILE" "+%-d %b %H:%M")"
-  else
-    echo "? | sfimage=wifi.slash sfcolor=#e67e22"
-    echo "---"
-    echo "QuotaPace | size=13"
-    echo "GitHub is unreachable and no cached data yet | color=${ORANGE} size=12"
-    echo "$(sanitize_error "$RESPONSE") | font=Menlo size=10 color=${SECONDARY_COLOR}"
-    echo "---"
-    echo "Refresh | refresh=true sfimage=arrow.clockwise"
-    exit 0
-  fi
-fi
+fetch_copilot() {
+  [[ -z "$GH_BIN" ]] && return 0
 
+  # `gh auth token` only reads local credentials; `gh auth status` hits the
+  # network, so it would misreport "not signed in" whenever the machine is offline.
+  if ! "$GH_BIN" auth token >/dev/null 2>&1; then
+    [[ -s "$CACHE_FILE" ]] && CP_STATE="signedout"
+    return 0
+  fi
+
+  RESPONSE="$("$GH_BIN" api /copilot_internal/user 2>&1)"
+  local api_exit=$?
+  if [[ $api_exit -ne 0 ]]; then
+    if echo "$RESPONSE" | grep -q "HTTP 401"; then
+      # The local token exists but GitHub rejected it — only here is re-login the fix.
+      CP_STATE="expired"
+      return 0
+    elif echo "$RESPONSE" | grep -qE "HTTP (403|404)"; then
+      # Signed in to GitHub, but this account/org has no Copilot access.
+      CP_STATE="nocopilot"
+      return 0
+    elif [[ -s "$CACHE_FILE" ]]; then
+      # Network trouble (offline, DNS, GitHub down): render the last good
+      # snapshot instead of an error; the cache mtime is when it was fetched.
+      RESPONSE="$(cat "$CACHE_FILE")"
+      OFFLINE_ASOF="$(date -r "$CACHE_FILE" "+%-d %b %H:%M")"
+      CP_STATE="offline"
+    else
+      CP_STATE="unreachable"
+      CP_ERR="$(sanitize_error "$RESPONSE")"
+      return 0
+    fi
+  else
+    CP_STATE="ok"
+  fi
+}
+
+# Parse the (fresh or cached) response and derive pace. Sets CP_STATE to
+# badresponse when the payload doesn't look like a Copilot quota snapshot.
+compute_copilot() {
 # IFS must be a tab: fields like the org name can contain spaces, and default
 # word splitting would shift every field after them.
 IFS=$'\t' read -r LOGIN REMAINING ENTITLEMENT PERCENT_REMAINING OVERAGE_PERMITTED RESET_UTC PLAN ORG <<EOF
@@ -297,14 +299,9 @@ $(echo "$RESPONSE" | "$JQ_BIN" -r '
 EOF
 
 if [[ -z "$PERCENT_REMAINING" || "$PERCENT_REMAINING" == "null" ]]; then
-  echo "?"
-  echo "---"
-  echo "QuotaPace | size=13"
-  echo "Unexpected response from Copilot API | color=${RED} size=12"
-  echo "$(sanitize_error "$RESPONSE") | font=Menlo size=10 color=${SECONDARY_COLOR}"
-  echo "---"
-  echo "Refresh | refresh=true sfimage=arrow.clockwise"
-  exit 0
+  CP_STATE="badresponse"
+  CP_ERR="$(sanitize_error "$RESPONSE")"
+  return 0
 fi
 
 # Only a fresh, validated response refreshes the cache; atomic so a killed
@@ -352,13 +349,132 @@ else
     COLOR="$YELLOW"; STATUS="Watch usage"
   fi
 fi
+}
 
-# Header status covers every quota, not just Copilot: the worst pace across
-# providers wins, and the offending quota is named in text so the alert
-# doesn't rely on color alone.
+cp_has_data() { [[ "$CP_STATE" == "ok" || "$CP_STATE" == "offline" ]]; }
+
+print_copilot_section() {
+  case "$CP_STATE" in absent | nocopilot) return 0 ;; esac
+  echo "---"
+  echo "**Copilot** | md=true size=13"
+  case "$CP_STATE" in
+    ok | offline)
+      # Usage-style bar: fill = quota used, tick = share of the billing month
+      # already elapsed. Fill past the tick means burning faster than time
+      # passes. Tick is skipped when the billing period couldn't be derived.
+      print_limit_line "Monthly" "$ACTUAL_USED_PCT" "$COLOR" "$ELAPSED_PCT"
+      echo "Resets ${RESET_DISPLAY:-${RESET_LOCAL:-$RESET_UTC}} · $(printf '%.0f' "$REMAINING") of ${ENTITLEMENT} left | size=11 color=${SECONDARY_COLOR}"
+      echo "${LOGIN} · ${PLAN} (${ORG}) | size=11 color=${SECONDARY_COLOR}"
+      ;;
+    signedout | expired)
+      local headline="Not signed in to GitHub"
+      [[ "$CP_STATE" == "expired" ]] && headline="GitHub sign-in expired"
+      echo "${headline} | size=11 color=${ORANGE}"
+      if [[ -x "$LOGIN_SCRIPT" ]]; then
+        echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
+      else
+        echo "gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
+      fi
+      ;;
+    unreachable)
+      echo "GitHub is unreachable and no cached data yet | size=11 color=${ORANGE}"
+      ;;
+    badresponse)
+      echo "Unexpected response from Copilot API | size=11 color=${ORANGE}"
+      echo "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
+      ;;
+  esac
+}
+
+# First-run guidance when no provider is detected at all.
+print_welcome_menu() {
+  echo "? | size=12.5"
+  echo "---"
+  echo "QuotaPace | size=13"
+  echo "No AI quota sources detected | color=${ORANGE} size=12"
+  echo "---"
+  echo "For GitHub Copilot: | size=12"
+  if [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]]; then
+    echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
+  else
+    echo "brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
+  fi
+  echo "For Antigravity: | size=12"
+  echo "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}"
+  echo "---"
+  echo "Refresh | refresh=true sfimage=arrow.clockwise"
+}
+
+fetch_copilot
+if cp_has_data; then
+  compute_copilot
+fi
 fetch_antigravity
-HEADER_COLOR="$COLOR"
-HEADER_STATUS="$STATUS"
+
+# When Copilot is in a problem state and no other provider has data, keep the
+# dedicated full-menu treatment: it is unambiguous and actionable. With
+# Antigravity data present, the same states shrink to lines inside the
+# Copilot section so the working provider stays visible.
+if [[ "$AGY_STATE" != "ok" ]]; then
+  case "$CP_STATE" in
+    signedout)
+      print_signin_menu "Not signed in to GitHub"
+      exit 0
+      ;;
+    expired)
+      print_signin_menu "GitHub sign-in expired"
+      exit 0
+      ;;
+    nocopilot)
+      # Sign-in wouldn't fix a missing seat, so point at Copilot settings.
+      echo "? | sfimage=exclamationmark.shield sfcolor=#e67e22"
+      echo "---"
+      echo "QuotaPace | size=13"
+      echo "GitHub Copilot isn't enabled for this account | color=${ORANGE} size=12"
+      echo "---"
+      echo "Open Copilot settings | href=https://github.com/settings/copilot color=${BLUE} size=12 sfimage=gearshape"
+      echo "---"
+      echo "Refresh | refresh=true sfimage=arrow.clockwise"
+      exit 0
+      ;;
+    unreachable)
+      echo "? | sfimage=wifi.slash sfcolor=#e67e22"
+      echo "---"
+      echo "QuotaPace | size=13"
+      echo "GitHub is unreachable and no cached data yet | color=${ORANGE} size=12"
+      echo "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
+      echo "---"
+      echo "Refresh | refresh=true sfimage=arrow.clockwise"
+      exit 0
+      ;;
+    badresponse)
+      echo "?"
+      echo "---"
+      echo "QuotaPace | size=13"
+      echo "Unexpected response from Copilot API | color=${RED} size=12"
+      echo "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
+      echo "---"
+      echo "Refresh | refresh=true sfimage=arrow.clockwise"
+      exit 0
+      ;;
+    absent)
+      if [[ "$AGY_STATE" == "absent" ]]; then
+        print_welcome_menu
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+# Header status covers every quota with data: the worst pace across providers
+# wins, and the offending quota is named in text so the alert doesn't rely on
+# color alone.
+HEADER_COLOR="$GREEN"
+HEADER_STATUS="On pace"
+if cp_has_data; then
+  HEADER_COLOR="$COLOR"
+  HEADER_STATUS="$STATUS"
+fi
 if [[ "$AGY_STATE" == "ok" ]]; then
   while IFS=$'\t' read -r AGY_LABEL AGY_USED _ AGY_ELAPSED; do
     [[ -z "$AGY_LABEL" ]] && continue
@@ -377,6 +493,20 @@ if [[ "$AGY_STATE" == "ok" ]]; then
   fi
 fi
 
+if ! cp_has_data && [[ "$AGY_STATE" != "ok" ]]; then
+  # Reachable only when Copilot is absent and the Antigravity CLI errored.
+  HEADER_COLOR="$ORANGE"
+  HEADER_STATUS="No quota data"
+fi
+
+# Menu bar percent: Copilot when it has data, else the busiest Antigravity group.
+if ! cp_has_data; then
+  PERCENT_TITLE=""
+  if [[ "$AGY_STATE" == "ok" ]]; then
+    PERCENT_TITLE="$(awk -F'\t' '$2 > m { m = $2 } END { printf "%.0f", m }' <<< "$AGY_ROWS")"
+  fi
+fi
+
 # Smaller than the native menu bar font size (14) — per user preference.
 TITLE_PARAMS="size=12.5"
 # Surface off-pace states in the menu bar itself via the alert color.
@@ -386,22 +516,21 @@ fi
 if [[ -n "$OFFLINE_ASOF" ]]; then
   TITLE_PARAMS+=" sfimage=wifi.slash"
 fi
-echo "${PERCENT_TITLE}% | ${TITLE_PARAMS}"
+if [[ -n "$PERCENT_TITLE" ]]; then
+  echo "${PERCENT_TITLE}% | ${TITLE_PARAMS}"
+else
+  echo "? | ${TITLE_PARAMS}"
+fi
 echo "---"
 echo "QuotaPace | size=13"
 echo "● ${HEADER_STATUS} | color=${HEADER_COLOR} size=11"
 if [[ -n "$OFFLINE_ASOF" ]]; then
   echo "Offline · cached data from ${OFFLINE_ASOF} | size=11 color=${SECONDARY_COLOR}"
 fi
-echo "---"
-# Usage-style bar: fill = quota used, tick = share of the billing month
-# already elapsed. Fill past the tick means burning faster than time passes.
-# Tick is skipped when the billing period couldn't be derived.
-echo "**Copilot** | md=true size=13"
-print_limit_line "Monthly" "$ACTUAL_USED_PCT" "$COLOR" "$ELAPSED_PCT"
-echo "Resets ${RESET_DISPLAY:-${RESET_LOCAL:-$RESET_UTC}} · $(printf '%.0f' "$REMAINING") of ${ENTITLEMENT} left | size=11 color=${SECONDARY_COLOR}"
-echo "${LOGIN} · ${PLAN} (${ORG}) | size=11 color=${SECONDARY_COLOR}"
+print_copilot_section
 print_antigravity_section
 echo "---"
 echo "Refresh | refresh=true sfimage=arrow.clockwise"
-echo "Open Copilot settings | href=https://github.com/settings/copilot sfimage=gearshape"
+if [[ "$CP_STATE" != "absent" ]]; then
+  echo "Open Copilot settings | href=https://github.com/settings/copilot sfimage=gearshape"
+fi

@@ -4,9 +4,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)
 
-A macOS menu bar tracker for your AI quotas (GitHub Copilot premium requests and, optionally, Google Antigravity model quotas), built as a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin.
+A macOS menu bar tracker for your AI quotas, built as a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin. It auto-detects which providers you use (GitHub Copilot premium requests via `gh`, Google Antigravity model quotas via the `antigravity-usage` CLI) and shows a section for each; with neither set up, the dropdown shows setup instructions instead.
 
-The menu bar shows your Copilot usage percentage. The dropdown adds one usage bar per quota, reset dates, and a header line that names any off-pace quota.
+The menu bar shows your Copilot usage percentage, or the busiest Antigravity group when Copilot isn't detected. The dropdown adds one usage bar per quota, reset dates, and a header line that names any off-pace quota.
 
 ```
 26%
@@ -34,8 +34,9 @@ The `│` tick on each bar marks where usage should be right now if it were spre
 
 - macOS
 - [SwiftBar](https://github.com/swiftbar/SwiftBar) (`brew install --cask swiftbar`)
-- [GitHub CLI](https://cli.github.com/) (`gh`), already authenticated (`gh auth login`) with access to a GitHub Copilot seat
 - `jq` (`brew install jq`)
+- For Copilot: [GitHub CLI](https://cli.github.com/) (`gh`), signed in (`gh auth login`), with a Copilot seat
+- For Antigravity: the `antigravity-usage` CLI (see below)
 
 ## Install
 
@@ -69,9 +70,9 @@ Since this endpoint only reports a live snapshot (not historical usage), the "ex
 
 The last successful response is cached at `~/Library/Caches/quotapace/quota.json`. When GitHub is unreachable (offline, DNS trouble, outage), the menu renders from that cache with an "Offline · cached data from …" note and a wifi-slash icon instead of an error. Sign-in is only suggested when GitHub rejects the token (HTTP 401).
 
-## Antigravity (optional)
+## Antigravity
 
-If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) CLI is installed (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`), the dropdown gains an Antigravity section with one bar per quota group: all Gemini models share one weekly quota, all Claude/GPT models another. Here the pace tick marks how much of the 7-day window has elapsed. The header status and menu bar color reflect the worst pace across all quotas and name the offender ("Antigravity Gemini over pace"). The last good response is cached at `~/Library/Caches/quotapace/antigravity.json` and shown with a "cached from …" note when the CLI fails. Without the CLI the section doesn't appear.
+If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) CLI is installed (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`), the dropdown gains an Antigravity section with one bar per quota group: all Gemini models share one weekly quota, all Claude/GPT models another. Here the pace tick marks how much of the 7-day window has elapsed. The header status and menu bar color reflect the worst pace across all quotas and name the offender ("Antigravity Gemini over pace"). The last good response is cached at `~/Library/Caches/quotapace/antigravity.json` and shown with a "cached from …" note when the CLI fails. Without the CLI the section doesn't appear, and Antigravity works standalone: no `gh` needed if Copilot isn't your thing.
 
 ## Testing
 

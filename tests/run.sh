@@ -210,16 +210,29 @@ run_plugin
 expect_contains "GitHub Copilot isn't enabled for this account"
 expect_not_contains "sign-in expired"
 
-begin "missing local token shows the sign-in menu"
+begin "signed out with no history shows first-run guidance"
 make_gh "exit 0"
+run_plugin AUTH_EXIT=1
+expect_contains "No AI quota sources detected"
+expect_contains "gh auth login"
+expect_contains "antigravity-usage login"
+
+begin "signed out with a cache still prompts to sign back in"
+make_gh "exit 0"
+seed_copilot_cache
 run_plugin AUTH_EXIT=1
 expect_contains "Not signed in to GitHub"
 
-begin "missing dependencies name the fix"
+begin "nothing installed shows first-run guidance"
+GH_STUB=""
+run_plugin
+expect_contains "No AI quota sources detected"
+
+begin "missing jq names the fix"
 GH_STUB=""
 run_plugin QUOTAPACE_JQ=
-expect_contains "Missing dependencies: gh jq"
-expect_contains "brew install gh jq"
+expect_contains "Missing dependencies: jq"
+expect_contains "brew install jq"
 
 begin "antigravity section renders groups with pace ticks"
 make_gh "echo '$(copilot_json 75 750)'; exit 0"
@@ -247,6 +260,38 @@ make_gh "echo '$(copilot_json 75 750)'; exit 0"
 make_agy "exit 1"
 run_plugin
 expect_contains "Quota unavailable · try: antigravity-usage doctor"
+
+begin "antigravity alone works without gh installed"
+GH_STUB=""
+make_agy "cat <<'JSON'
+$(agy_json)
+JSON"
+run_plugin
+# Title falls back to the busiest Antigravity group.
+expect_contains "60% | size=12.5"
+expect_contains "**Antigravity**"
+expect_not_contains "**Copilot**"
+expect_not_contains "Open Copilot settings"
+
+begin "no Copilot seat hides the section when Antigravity has data"
+make_gh "echo 'HTTP 403: forbidden'; exit 1"
+make_agy "cat <<'JSON'
+$(agy_json)
+JSON"
+run_plugin
+expect_contains "**Antigravity**"
+expect_not_contains "**Copilot**"
+expect_not_contains "isn't enabled"
+
+begin "expired sign-in shrinks to a section line when Antigravity has data"
+make_gh "echo 'HTTP 401: Bad credentials'; exit 1"
+make_agy "cat <<'JSON'
+$(agy_json)
+JSON"
+run_plugin
+expect_contains "**Copilot**"
+expect_contains "GitHub sign-in expired"
+expect_contains "**Antigravity**"
 
 # ---------------------------------------------------------------------------
 
