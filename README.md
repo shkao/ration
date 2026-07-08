@@ -1,8 +1,34 @@
 # QuotaPace
 
+[![CI](https://github.com/shkao/quotapace/actions/workflows/ci.yml/badge.svg)](https://github.com/shkao/quotapace/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)
+
 A macOS menu bar tracker for your AI quotas (GitHub Copilot premium requests and, optionally, Google Antigravity model quotas), built as a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin.
 
 Shows your Copilot usage percentage in the menu bar. The dropdown shows one usage bar per quota with a pace tick marking how much of the quota window has elapsed, reset dates, and a header status naming any quota that's burning faster than time passes.
+
+```
+26%
+─────────────────────────────────────
+QuotaPace
+● All quotas on pace
+─────────────────────────────────────
+Copilot
+Monthly:    [████│░░░░░░░░░░░]  26% used
+Resets 1 Aug 02:00 · 5150 of 7000 left
+─────────────────────────────────────
+Antigravity
+Gemini:     [█░░░░░░░░░░░░░│░]   7% used
+Resets 9 Jul 21:09
+Claude+GPT: [│░░░░░░░░░░░░░░░]   0% used
+Resets 15 Jul 19:38
+─────────────────────────────────────
+Refresh
+Open Copilot settings
+```
+
+The `│` tick on each bar marks where usage should be right now if it were spread evenly across the quota window. Fill past the tick means burning faster than time passes; the menu bar percentage turns orange, then red.
 
 ## Prerequisites
 
@@ -27,7 +53,8 @@ Then open SwiftBar, go to **Preferences > Plugins**, and set the Plugin Folder t
 quotapace.5m.sh              the plugin, everything in one file by design
 helpers/quotapace-login.sh   "Sign in with GitHub…" recovery action
 install.sh                   copies both files into place
-.github/workflows/ci.yml     shellcheck + syntax check on every push
+tests/run.sh                 integration tests (stubbed gh, isolated $HOME)
+.github/workflows/ci.yml     shellcheck on Linux, tests on macOS
 ```
 
 SwiftBar executes a single file per plugin from its plugin folder, so `quotapace.5m.sh` deliberately stays one self-contained script: no sourced libraries, no build step.
@@ -45,6 +72,21 @@ The last successful response is cached at `~/Library/Caches/quotapace/quota.json
 ## Antigravity (optional)
 
 If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) CLI is installed (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`), the dropdown gains an Antigravity section with one bar per quota group: all Gemini models share one weekly quota, all Claude/GPT models another. The pace tick marks how much of the 7-day window has elapsed. The header status and menu bar color reflect the worst pace across all quotas, naming the offending quota (e.g. "Antigravity Gemini over pace"). The last good response is cached at `~/Library/Caches/quotapace/antigravity.json` and shown with a "cached from …" note when the CLI fails; without the CLI the section simply doesn't appear.
+
+## Testing
+
+```bash
+./tests/run.sh
+```
+
+The suite runs the real plugin end to end against stub `gh` / `antigravity-usage` binaries and an isolated `$HOME`, covering the happy path, pace escalation, every error branch (offline, expired token, no Copilot seat, missing dependencies), and both cache fallbacks. CI runs it on a macOS runner; shellcheck runs on Linux.
+
+## Uninstall
+
+```bash
+rm ~/.swiftbar-plugins/quotapace.5m.sh
+rm -rf ~/.quotapace-helpers ~/Library/Caches/quotapace
+```
 
 ## Caveats
 
