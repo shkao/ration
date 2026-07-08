@@ -12,8 +12,10 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 # Consistent decimal points regardless of the user's locale
 export LC_ALL=C
 
-GH_BIN="$(command -v gh)"
-JQ_BIN="$(command -v jq)"
+# The `-` (not `:-`) fallbacks are test seams: the suite in tests/ overrides
+# these with stubs, and setting an empty value simulates a missing dependency.
+GH_BIN="${QUOTAPACE_GH-$(command -v gh)}"
+JQ_BIN="${QUOTAPACE_JQ-$(command -v jq)}"
 
 
 # Adaptive "light_appearance,dark_appearance" colors — needed because any line
@@ -140,7 +142,7 @@ AGY_EMAIL=""
 AGY_ASOF=""
 fetch_antigravity() {
   local agy_bin
-  agy_bin="$(command -v antigravity-usage)"
+  agy_bin="${QUOTAPACE_AGY-$(command -v antigravity-usage)}"
   if [[ -z "$agy_bin" ]]; then
     # SwiftBar's PATH has no nvm shims; pick the newest nvm-installed copy.
     # shellcheck disable=SC2012
@@ -337,14 +339,12 @@ RESET_DISPLAY="$(format_reset "$EPOCH_END")"
 COLOR="$GREEN"
 STATUS="On pace"
 if [[ -n "$ELAPSED_PCT" ]]; then
-  DIFF=$(awk -v used="$ACTUAL_USED_PCT" -v elapsed="$ELAPSED_PCT" 'BEGIN { printf "%.4f", used - elapsed }')
-  if float_gt "$DIFF" 30; then
-    COLOR="$RED"; STATUS="Burning fast — may run out before reset"
-  elif float_gt "$DIFF" 15; then
-    COLOR="$ORANGE"; STATUS="Over pace"
-  elif float_gt "$DIFF" 5; then
-    COLOR="$YELLOW"; STATUS="Slightly over pace"
-  fi
+  COLOR="$(pace_color "$ACTUAL_USED_PCT" "$ELAPSED_PCT")"
+  case "$(color_rank "$COLOR")" in
+    3) STATUS="Burning fast — may run out before reset" ;;
+    2) STATUS="Over pace" ;;
+    1) STATUS="Slightly over pace" ;;
+  esac
 else
   if float_gt 20 "$PERCENT_REMAINING"; then
     COLOR="$RED"; STATUS="Low remaining"
