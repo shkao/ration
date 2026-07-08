@@ -6,7 +6,7 @@
 
 A macOS menu bar tracker for your AI quotas (GitHub Copilot premium requests and, optionally, Google Antigravity model quotas), built as a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin.
 
-Shows your Copilot usage percentage in the menu bar. The dropdown shows one usage bar per quota with a pace tick marking how much of the quota window has elapsed, reset dates, and a header status naming any quota that's burning faster than time passes.
+The menu bar shows your Copilot usage percentage. The dropdown adds one usage bar per quota, reset dates, and a header line that names any off-pace quota.
 
 ```
 26%
@@ -67,11 +67,11 @@ QuotaPace shells out to `gh api /copilot_internal/user`, an internal (undocument
 
 Since this endpoint only reports a live snapshot (not historical usage), the "expected pace" comparison is computed locally by assuming a monthly billing cycle ending on `quota_reset_date`.
 
-The last successful response is cached at `~/Library/Caches/quotapace/quota.json`. When GitHub is unreachable (offline, DNS trouble, outage), the menu renders from that cache with an "Offline · cached data from …" note and a wifi-slash icon instead of an error, and it only asks you to sign in again when GitHub actually rejects the token (HTTP 401).
+The last successful response is cached at `~/Library/Caches/quotapace/quota.json`. When GitHub is unreachable (offline, DNS trouble, outage), the menu renders from that cache with an "Offline · cached data from …" note and a wifi-slash icon instead of an error. Sign-in is only suggested when GitHub rejects the token (HTTP 401).
 
 ## Antigravity (optional)
 
-If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) CLI is installed (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`), the dropdown gains an Antigravity section with one bar per quota group: all Gemini models share one weekly quota, all Claude/GPT models another. The pace tick marks how much of the 7-day window has elapsed. The header status and menu bar color reflect the worst pace across all quotas, naming the offending quota (e.g. "Antigravity Gemini over pace"). The last good response is cached at `~/Library/Caches/quotapace/antigravity.json` and shown with a "cached from …" note when the CLI fails; without the CLI the section simply doesn't appear.
+If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) CLI is installed (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`), the dropdown gains an Antigravity section with one bar per quota group: all Gemini models share one weekly quota, all Claude/GPT models another. Here the pace tick marks how much of the 7-day window has elapsed. The header status and menu bar color reflect the worst pace across all quotas and name the offender ("Antigravity Gemini over pace"). The last good response is cached at `~/Library/Caches/quotapace/antigravity.json` and shown with a "cached from …" note when the CLI fails. Without the CLI the section doesn't appear.
 
 ## Testing
 
@@ -79,7 +79,7 @@ If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) 
 ./tests/run.sh
 ```
 
-The suite runs the real plugin end to end against stub `gh` / `antigravity-usage` binaries and an isolated `$HOME`, covering the happy path, pace escalation, every error branch (offline, expired token, no Copilot seat, missing dependencies), and both cache fallbacks. CI runs it on a macOS runner; shellcheck runs on Linux.
+The suite runs the real plugin end to end against stub `gh` / `antigravity-usage` binaries and an isolated `$HOME`. It covers the happy path, pace escalation, every error branch (offline, expired token, no Copilot seat, missing dependencies), and both cache fallbacks. CI runs the suite on a macOS runner and shellcheck on Linux.
 
 ## Uninstall
 
