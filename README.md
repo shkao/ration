@@ -12,25 +12,12 @@ A macOS menu bar tracker for the AI quotas you didn't choose, built as a [SwiftB
 
 The menu bar shows a gauge icon and your Copilot usage percentage, or the busiest Antigravity group when Copilot isn't detected; the gauge becomes a warning triangle when a ration is burning fast, so the worst state doesn't rely on color alone. The dropdown adds one usage bar per quota, reset dates, and a header line that names any off-pace quota. Hovering the menu bar item or a bar shows a tooltip explaining the numbers.
 
-```
-26%
-─────────────────────────────────────
-Ration
-● All rations on pace
-─────────────────────────────────────
-Copilot
-Monthly:    [████│░░░░░░░░░░░]  26% used
-Resets 1 Aug 02:00 · 5150 of 7000 left
-─────────────────────────────────────
-Antigravity
-Gemini:     [█░░░░░░░░░░░░░│░]   7% used
-Resets 9 Jul 21:09
-Claude+GPT: [│░░░░░░░░░░░░░░░]   0% used
-Resets 15 Jul 19:38
-─────────────────────────────────────
-Refresh
-Open Copilot settings
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/ration-dark.png">
+    <img src="assets/ration-light.png" alt="Ration's menu bar dropdown: a 26% gauge in the menu bar, with Copilot and Antigravity quota bars, reset dates, and an 'All rations on pace' status" width="340">
+  </picture>
+</p>
 
 The `│` tick on each bar marks your fair share for right now: where usage would sit if you spread it evenly across the quota window. Fill past the tick means you're borrowing from tomorrow; the menu bar percentage turns orange, then red.
 
