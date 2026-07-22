@@ -41,6 +41,22 @@ BAR_WIDTH=16
 CACHE_DIR="${HOME}/Library/Caches/quotapace"
 CACHE_FILE="${CACHE_DIR}/quota.json"
 
+# macOS has no `timeout`; without one a stalled network call would hang the
+# SwiftBar refresh indefinitely. The watchdog's output goes to /dev/null so
+# its sleep can't hold a caller's command-substitution pipe open. `:-` so an
+# empty override still means the default; tests shorten it via QUOTAPACE_TIMEOUT.
+FETCH_TIMEOUT="${QUOTAPACE_TIMEOUT:-15}"
+run_with_timeout() {
+  "$@" &
+  local cmd=$!
+  ( sleep "$FETCH_TIMEOUT" && kill "$cmd" ) >/dev/null 2>&1 &
+  local dog=$!
+  local rc=0
+  wait "$cmd" || rc=$?
+  kill "$dog" 2>/dev/null
+  return "$rc"
+}
+
 # True when $1 > $2, for floats (bash arithmetic is integer-only; avoids a bc dependency)
 float_gt() {
   awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 > b + 0) }'
@@ -106,7 +122,7 @@ print_limit_line() {
   rounded="$(printf '%.0f' "$percent_used")"
   bar="$(usage_bar "$rounded" "$pace_pct")"
   # %-11s fits the longest label ("Claude+GPT:") so bars align across sections
-  printf '%-11s [%s] %3s%% used | font=Menlo size=11 color=%s\n' \
+  printf '%-11s [%s] %3s%% used | font=Menlo size=11 color=%s tooltip="Tick = where usage should be by now. Fill past it = over pace."\n' \
     "${label}:" "$bar" "$rounded" "$color"
 }
 
@@ -171,7 +187,7 @@ fetch_antigravity() {
   [[ -z "$agy_bin" ]] && return 0
 
   local agy_cache="${CACHE_DIR}/antigravity.json" json parsed=""
-  json="$("$agy_bin" --json 2>/dev/null)"
+  json="$(run_with_timeout "$agy_bin" --json 2>/dev/null)"
   [[ -n "$json" ]] && parsed="$(parse_antigravity <<< "$json")"
   if [[ -n "$parsed" ]]; then
     mkdir -p "$CACHE_DIR" 2>/dev/null
@@ -240,7 +256,7 @@ signin_item() {
 # jq parses every provider's output, so it stays a hard requirement. gh is
 # only needed for Copilot; its absence just means that provider isn't shown.
 if [[ -z "$JQ_BIN" ]]; then
-  print_takeover_menu "?" \
+  print_takeover_menu "? | sfimage=gauge" \
     "Missing dependencies: jq | color=${RED} size=12" \
     "brew install jq | font=Menlo size=11 color=${SECONDARY_COLOR}"
   exit 0
@@ -257,7 +273,7 @@ print_signin_menu() {
     # menu item would be worse than pointing at the terminal command.
     extras+=("Run in a terminal: | size=12" "gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}")
   fi
-  print_takeover_menu "? | sfimage=person.crop.circle.badge.exclamationmark sfcolor=#e74c3c" \
+  print_takeover_menu "? | sfimage=person.crop.circle.badge.exclamationmark sfcolor=${RED}" \
     "${headline} | color=${RED} size=12" "${extras[@]}"
 }
 
@@ -281,8 +297,10 @@ fetch_copilot() {
     return 0
   fi
 
-  RESPONSE="$("$GH_BIN" api /copilot_internal/user 2>&1)"
+  RESPONSE="$(run_with_timeout "$GH_BIN" api /copilot_internal/user 2>&1)"
   local api_exit=$?
+  # A watchdog kill leaves no output; give the error screens something to show.
+  [[ $api_exit -ne 0 && -z "$RESPONSE" ]] && RESPONSE="gh api gave no response within ${FETCH_TIMEOUT}s"
   if [[ $api_exit -ne 0 ]]; then
     if echo "$RESPONSE" | grep -q "HTTP 401"; then
       # The local token exists but GitHub rejected it — only here is re-login the fix.
@@ -418,7 +436,7 @@ print_copilot_section() {
 print_welcome_menu() {
   local copilot_hint="brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
   [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]] && copilot_hint="$(signin_item)"
-  print_takeover_menu "? | size=12.5" \
+  print_takeover_menu "? | size=12.5 sfimage=gauge" \
     "No AI quota sources detected | color=${ORANGE} size=12" \
     "---" \
     "For GitHub Copilot: | size=12" \
@@ -449,20 +467,20 @@ if [[ "$AGY_STATE" != "ok" ]]; then
       ;;
     nocopilot)
       # Sign-in wouldn't fix a missing seat, so point at Copilot settings.
-      print_takeover_menu "? | sfimage=exclamationmark.shield sfcolor=#e67e22" \
+      print_takeover_menu "? | sfimage=exclamationmark.shield sfcolor=${ORANGE}" \
         "GitHub Copilot isn't enabled for this account | color=${ORANGE} size=12" \
         "---" \
         "Open Copilot settings | href=https://github.com/settings/copilot color=${BLUE} size=12 sfimage=gearshape"
       exit 0
       ;;
     unreachable)
-      print_takeover_menu "? | sfimage=wifi.slash sfcolor=#e67e22" \
+      print_takeover_menu "? | sfimage=wifi.slash sfcolor=${ORANGE}" \
         "${CP_MSG_UNREACHABLE} | color=${ORANGE} size=12" \
         "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
       exit 0
       ;;
     badresponse)
-      print_takeover_menu "?" \
+      print_takeover_menu "? | sfimage=gauge" \
         "${CP_MSG_BADRESPONSE} | color=${RED} size=12" \
         "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
       exit 0
@@ -524,9 +542,16 @@ TITLE_PARAMS="size=12.5"
 if [[ "$HEADER_COLOR" == "$RED" || "$HEADER_COLOR" == "$ORANGE" ]]; then
   TITLE_PARAMS+=" color=${HEADER_COLOR}"
 fi
-if [[ -n "$OFFLINE_ASOF" ]]; then
-  TITLE_PARAMS+=" sfimage=wifi.slash"
-fi
+# Gauge glyph gives the bare percentage an identity next to other numeric
+# menu bar items. Red swaps in a warning glyph so the worst state doesn't
+# rely on color alone; offline keeps its wifi-slash.
+TITLE_ICON="gauge"
+[[ "$HEADER_COLOR" == "$RED" ]] && TITLE_ICON="exclamationmark.triangle"
+[[ -n "$OFFLINE_ASOF" ]] && TITLE_ICON="wifi.slash"
+TITLE_PARAMS+=" sfimage=${TITLE_ICON}"
+TITLE_TOOLTIP="QuotaPace · ${HEADER_STATUS}"
+[[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="QuotaPace · ${PERCENT_TITLE}% used · ${HEADER_STATUS}"
+TITLE_PARAMS+=" tooltip=\"${TITLE_TOOLTIP}\""
 if [[ -n "$PERCENT_TITLE" ]]; then
   echo "${PERCENT_TITLE}% | ${TITLE_PARAMS}"
 else

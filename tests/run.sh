@@ -175,6 +175,10 @@ expect_contains "● On pace"
 expect_contains "25% used"
 expect_contains "750 of 1000 left"
 expect_contains "octocat · business (Acme Corp)"
+# Menu bar identity: gauge glyph plus a tooltip naming the app and status.
+expect_contains "sfimage=gauge"
+expect_contains 'tooltip="QuotaPace · 25% used · On pace"'
+expect_contains 'tooltip="Tick = where usage should be by now. Fill past it = over pace."'
 expect_not_contains "Antigravity"
 
 begin "heavy usage escalates to burning fast"
@@ -182,8 +186,10 @@ make_gh_ok 10 100
 run_plugin
 expect_contains "● Burning fast — may run out before reset"
 expect_contains "90% used"
-# Off-pace states must surface in the menu bar itself via the alert color.
+# Off-pace states must surface in the menu bar itself via the alert color,
+# and the red state must also swap the glyph so it doesn't rely on color alone.
 expect_contains "90% | size=12.5 color="
+expect_contains "sfimage=exclamationmark.triangle"
 
 begin "happy path writes the offline cache"
 make_gh_ok
@@ -208,6 +214,27 @@ make_gh "echo 'error connecting to api.github.com: no such host'; exit 1"
 run_plugin
 expect_contains "GitHub is unreachable and no cached data yet"
 expect_not_contains "Sign in with GitHub"
+
+# QUOTAPACE_TIMEOUT=1 shrinks the watchdog so these stay fast; the stubs
+# sleep past it to simulate a stalled network call.
+begin "hung gh call times out instead of hanging the refresh"
+make_gh "sleep 2; echo 'never arrives'; exit 0"
+run_plugin QUOTAPACE_TIMEOUT=1
+expect_contains "GitHub is unreachable and no cached data yet"
+expect_contains "gh api gave no response within 1s"
+
+begin "hung gh call falls back to cached data"
+seed_copilot_cache
+make_gh "sleep 2; echo 'never arrives'; exit 0"
+run_plugin QUOTAPACE_TIMEOUT=1
+expect_contains "Offline · cached data from"
+expect_contains "25% used"
+
+begin "hung antigravity CLI times out and degrades to one line"
+make_gh_ok
+make_agy "sleep 2; exit 0"
+run_plugin QUOTAPACE_TIMEOUT=1
+expect_contains "Quota unavailable · try: antigravity-usage doctor"
 
 begin "HTTP 401 asks to sign in again"
 make_gh "echo 'HTTP 401: Bad credentials'; exit 1"

@@ -6,7 +6,7 @@
 
 A macOS menu bar tracker for your AI quotas, built as a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin. It auto-detects which providers you use (GitHub Copilot premium requests via `gh`, Google Antigravity model quotas via the `antigravity-usage` CLI) and shows a section for each; with neither set up, the dropdown shows setup instructions instead.
 
-The menu bar shows your Copilot usage percentage, or the busiest Antigravity group when Copilot isn't detected. The dropdown adds one usage bar per quota, reset dates, and a header line that names any off-pace quota.
+The menu bar shows a gauge icon and your Copilot usage percentage, or the busiest Antigravity group when Copilot isn't detected; the gauge becomes a warning triangle when a quota is burning fast, so the worst state doesn't rely on color alone. The dropdown adds one usage bar per quota, reset dates, and a header line that names any off-pace quota. Hovering the menu bar item or a bar shows a tooltip explaining the numbers.
 
 ```
 26%
@@ -68,7 +68,7 @@ QuotaPace shells out to `gh api /copilot_internal/user`, an internal (undocument
 
 Since this endpoint only reports a live snapshot (not historical usage), the "expected pace" comparison is computed locally by assuming a monthly billing cycle ending on `quota_reset_date`.
 
-The last successful response is cached at `~/Library/Caches/quotapace/quota.json`. When GitHub is unreachable (offline, DNS trouble, outage), the menu renders from that cache with an "Offline · cached data from …" note and a wifi-slash icon instead of an error. Sign-in is only suggested when GitHub rejects the token (HTTP 401).
+The last successful response is cached at `~/Library/Caches/quotapace/quota.json`. When GitHub is unreachable (offline, DNS trouble, outage), the menu renders from that cache with an "Offline · cached data from …" note and a wifi-slash icon instead of an error. Sign-in is only suggested when GitHub rejects the token (HTTP 401). Every fetch runs under a 15-second watchdog, so a stalled connection counts as a network failure and falls back to the cache instead of hanging the refresh.
 
 ## Antigravity
 
@@ -80,7 +80,7 @@ If the [antigravity-usage](https://github.com/skainguyen1412/antigravity-usage) 
 ./tests/run.sh
 ```
 
-The suite runs the real plugin end to end against stub `gh` / `antigravity-usage` binaries and an isolated `$HOME`. It covers the happy path, pace escalation, every error branch (offline, expired token, no Copilot seat, missing dependencies), and both cache fallbacks. CI runs the suite on a macOS runner and shellcheck on Linux.
+The suite runs the real plugin end to end against stub `gh` / `antigravity-usage` binaries and an isolated `$HOME`. It covers the happy path, pace escalation, every error branch (offline, stalled network calls, expired token, no Copilot seat, missing dependencies), and both cache fallbacks. CI runs the suite on a macOS runner and shellcheck on Linux.
 
 ## Uninstall
 
@@ -93,6 +93,7 @@ rm -rf ~/.quotapace-helpers ~/Library/Caches/quotapace
 
 - `/copilot_internal/user` is not a public documented API and could change without notice.
 - The pace calculation assumes a monthly reset cycle starting one calendar month before the reported reset date, which is accurate for standard GitHub Copilot business/enterprise billing but may not match unusual cycles.
+- The Antigravity section shows percentages only: the `antigravity-usage` CLI doesn't expose absolute request counts.
 
 ## License
 
