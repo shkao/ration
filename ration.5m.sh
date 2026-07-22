@@ -1,9 +1,9 @@
 #!/bin/bash
-# <xbar.title>QuotaPace</xbar.title>
-# <xbar.version>v2.5</xbar.version>
+# <xbar.title>Ration</xbar.title>
+# <xbar.version>v3.0</xbar.version>
 # <xbar.author>Allen Kao</xbar.author>
 # <xbar.author.github>shkao</xbar.author.github>
-# <xbar.desc>Tracks GitHub Copilot and Google Antigravity quota pace</xbar.desc>
+# <xbar.desc>Rations your AI quotas: tracks Copilot and Antigravity pace so they last until reset</xbar.desc>
 # <xbar.dependencies>gh,jq,awk</xbar.dependencies>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
@@ -14,8 +14,8 @@ export LC_ALL=C
 
 # The `-` (not `:-`) fallbacks are test seams: the suite in tests/ overrides
 # these with stubs, and setting an empty value simulates a missing dependency.
-GH_BIN="${QUOTAPACE_GH-$(command -v gh)}"
-JQ_BIN="${QUOTAPACE_JQ-$(command -v jq)}"
+GH_BIN="${RATION_GH-$(command -v gh)}"
+JQ_BIN="${RATION_JQ-$(command -v jq)}"
 
 
 # Adaptive "light_appearance,dark_appearance" colors — needed because any line
@@ -34,18 +34,18 @@ BLUE="#0969da,#58a6ff"
 # its plugin directory as its own plugin and runs it automatically, which
 # previously caused this login script to auto-execute `gh auth login --web`
 # on every SwiftBar launch instead of only when the user clicks the menu item.
-LOGIN_SCRIPT="${HOME}/.quotapace-helpers/quotapace-login.sh"
+LOGIN_SCRIPT="${HOME}/.ration-helpers/ration-login.sh"
 BAR_WIDTH=16
 
 # Last successful API response, so going offline shows stale data instead of errors.
-CACHE_DIR="${HOME}/Library/Caches/quotapace"
+CACHE_DIR="${HOME}/Library/Caches/ration"
 CACHE_FILE="${CACHE_DIR}/quota.json"
 
 # macOS has no `timeout`; without one a stalled network call would hang the
 # SwiftBar refresh indefinitely. The watchdog's output goes to /dev/null so
 # its sleep can't hold a caller's command-substitution pipe open. `:-` so an
-# empty override still means the default; tests shorten it via QUOTAPACE_TIMEOUT.
-FETCH_TIMEOUT="${QUOTAPACE_TIMEOUT:-15}"
+# empty override still means the default; tests shorten it via RATION_TIMEOUT.
+FETCH_TIMEOUT="${RATION_TIMEOUT:-15}"
 run_with_timeout() {
   "$@" &
   local cmd=$!
@@ -122,7 +122,7 @@ print_limit_line() {
   rounded="$(printf '%.0f' "$percent_used")"
   bar="$(usage_bar "$rounded" "$pace_pct")"
   # %-11s fits the longest label ("Claude+GPT:") so bars align across sections
-  printf '%-11s [%s] %3s%% used | font=Menlo size=11 color=%s tooltip="Tick = where usage should be by now. Fill past it = over pace."\n' \
+  printf '%-11s [%s] %3s%% used | font=Menlo size=11 color=%s tooltip="Tick = your fair share spent by now. Fill past it = borrowing from tomorrow."\n' \
     "${label}:" "$bar" "$rounded" "$color"
 }
 
@@ -178,7 +178,7 @@ parse_antigravity() {
 
 fetch_antigravity() {
   local agy_bin
-  agy_bin="${QUOTAPACE_AGY-$(command -v antigravity-usage)}"
+  agy_bin="${RATION_AGY-$(command -v antigravity-usage)}"
   if [[ -z "$agy_bin" ]]; then
     # SwiftBar's PATH has no nvm shims; pick the newest nvm-installed copy.
     # shellcheck disable=SC2012
@@ -239,7 +239,7 @@ print_takeover_menu() {
   shift 2
   echo "$title"
   echo "---"
-  echo "QuotaPace | size=13"
+  echo "Ration | size=13"
   echo "$headline"
   local line
   for line in "$@"; do
@@ -384,16 +384,22 @@ STATUS="On pace"
 if [[ -n "$ELAPSED_PCT" ]]; then
   COLOR="$(pace_color "$ACTUAL_USED_PCT" "$ELAPSED_PCT")"
   case "$(color_rank "$COLOR")" in
-    3) STATUS="Burning fast — may run out before reset" ;;
+    3) STATUS="Burning through the ration · may run out before reset" ;;
     2) STATUS="Over pace" ;;
     1) STATUS="Slightly over pace" ;;
   esac
 else
   if float_gt 20 "$PERCENT_REMAINING"; then
-    COLOR="$RED"; STATUS="Low remaining"
+    COLOR="$RED"; STATUS="Ration running low"
   elif float_gt 50 "$PERCENT_REMAINING"; then
-    COLOR="$YELLOW"; STATUS="Watch usage"
+    COLOR="$YELLOW"; STATUS="Watch the ration"
   fi
+fi
+
+# The state this app is named for: nothing left to pace, only the wait.
+if ! float_gt "$PERCENT_REMAINING" 0; then
+  COLOR="$RED"
+  STATUS="Ration exhausted · see you on reset day"
 fi
 }
 
@@ -437,7 +443,7 @@ print_welcome_menu() {
   local copilot_hint="brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
   [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]] && copilot_hint="$(signin_item)"
   print_takeover_menu "? | size=12.5 sfimage=gauge" \
-    "No AI quota sources detected | color=${ORANGE} size=12" \
+    "Nothing to ration yet · no AI quota sources detected | color=${ORANGE} size=12" \
     "---" \
     "For GitHub Copilot: | size=12" \
     "$copilot_hint" \
@@ -518,7 +524,7 @@ if [[ "$AGY_STATE" == "ok" ]]; then
     fi
   done <<< "$AGY_ROWS"
   if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]]; then
-    HEADER_STATUS="All quotas on pace"
+    HEADER_STATUS="All rations on pace"
   fi
 fi
 
@@ -549,8 +555,8 @@ TITLE_ICON="gauge"
 [[ "$HEADER_COLOR" == "$RED" ]] && TITLE_ICON="exclamationmark.triangle"
 [[ -n "$OFFLINE_ASOF" ]] && TITLE_ICON="wifi.slash"
 TITLE_PARAMS+=" sfimage=${TITLE_ICON}"
-TITLE_TOOLTIP="QuotaPace · ${HEADER_STATUS}"
-[[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="QuotaPace · ${PERCENT_TITLE}% used · ${HEADER_STATUS}"
+TITLE_TOOLTIP="Ration · ${HEADER_STATUS}"
+[[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="Ration · ${PERCENT_TITLE}% used · ${HEADER_STATUS}"
 TITLE_PARAMS+=" tooltip=\"${TITLE_TOOLTIP}\""
 if [[ -n "$PERCENT_TITLE" ]]; then
   echo "${PERCENT_TITLE}% | ${TITLE_PARAMS}"
@@ -558,7 +564,7 @@ else
   echo "? | ${TITLE_PARAMS}"
 fi
 echo "---"
-echo "QuotaPace | size=13"
+echo "Ration | size=13"
 echo "● ${HEADER_STATUS} | color=${HEADER_COLOR} size=11"
 if [[ -n "$OFFLINE_ASOF" ]]; then
   echo "Offline · cached data from ${OFFLINE_ASOF} | size=11 color=${SECONDARY_COLOR}"

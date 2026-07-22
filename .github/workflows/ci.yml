@@ -13,9 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck quotapace.5m.sh install.sh helpers/quotapace-login.sh tests/run.sh
+        run: shellcheck ration.5m.sh install.sh helpers/ration-login.sh tests/run.sh
       - name: bash syntax
-        run: bash -n quotapace.5m.sh install.sh helpers/quotapace-login.sh tests/run.sh
+        run: bash -n ration.5m.sh install.sh helpers/ration-login.sh tests/run.sh
 
   test:
     # The plugin targets macOS (BSD date, SwiftBar), so the integration

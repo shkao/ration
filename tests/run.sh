@@ -1,5 +1,5 @@
 #!/bin/bash
-# Integration tests for quotapace.5m.sh.
+# Integration tests for ration.5m.sh.
 #
 # Each test runs the real plugin end to end against stub `gh` /
 # `antigravity-usage` binaries and an isolated $HOME, then asserts on the
@@ -8,7 +8,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLUGIN="$ROOT/quotapace.5m.sh"
+PLUGIN="$ROOT/ration.5m.sh"
 JQ="$(command -v jq)"
 
 if [[ -z "$JQ" ]]; then
@@ -70,9 +70,9 @@ JSON"
 run_plugin() {
   OUTPUT="$(env \
     HOME="$FAKE_HOME" \
-    QUOTAPACE_GH="${GH_STUB:-}" \
-    QUOTAPACE_JQ="$JQ" \
-    QUOTAPACE_AGY="${AGY_STUB:-}" \
+    RATION_GH="${GH_STUB:-}" \
+    RATION_JQ="$JQ" \
+    RATION_AGY="${AGY_STUB:-}" \
     "$@" \
     "$PLUGIN" 2>/dev/null)"
 }
@@ -154,13 +154,13 @@ EOF
 }
 
 seed_copilot_cache() {
-  mkdir -p "$FAKE_HOME/Library/Caches/quotapace"
-  copilot_json 75 750 > "$FAKE_HOME/Library/Caches/quotapace/quota.json"
+  mkdir -p "$FAKE_HOME/Library/Caches/ration"
+  copilot_json 75 750 > "$FAKE_HOME/Library/Caches/ration/quota.json"
 }
 
 seed_agy_cache() {
-  mkdir -p "$FAKE_HOME/Library/Caches/quotapace"
-  agy_json > "$FAKE_HOME/Library/Caches/quotapace/antigravity.json"
+  mkdir -p "$FAKE_HOME/Library/Caches/ration"
+  agy_json > "$FAKE_HOME/Library/Caches/ration/antigravity.json"
 }
 
 # ---------------------------------------------------------------------------
@@ -177,24 +177,31 @@ expect_contains "750 of 1000 left"
 expect_contains "octocat · business (Acme Corp)"
 # Menu bar identity: gauge glyph plus a tooltip naming the app and status.
 expect_contains "sfimage=gauge"
-expect_contains 'tooltip="QuotaPace · 25% used · On pace"'
-expect_contains 'tooltip="Tick = where usage should be by now. Fill past it = over pace."'
+expect_contains 'tooltip="Ration · 25% used · On pace"'
+expect_contains 'tooltip="Tick = your fair share spent by now. Fill past it = borrowing from tomorrow."'
 expect_not_contains "Antigravity"
 
 begin "heavy usage escalates to burning fast"
 make_gh_ok 10 100
 run_plugin
-expect_contains "● Burning fast — may run out before reset"
+expect_contains "● Burning through the ration · may run out before reset"
 expect_contains "90% used"
 # Off-pace states must surface in the menu bar itself via the alert color,
 # and the red state must also swap the glyph so it doesn't rely on color alone.
 expect_contains "90% | size=12.5 color="
 expect_contains "sfimage=exclamationmark.triangle"
 
+begin "exhausted quota counts down to reset day"
+make_gh_ok 0 0
+run_plugin
+expect_contains "● Ration exhausted · see you on reset day"
+expect_contains "100% used"
+expect_contains "sfimage=exclamationmark.triangle"
+
 begin "happy path writes the offline cache"
 make_gh_ok
 run_plugin
-if [[ -s "$FAKE_HOME/Library/Caches/quotapace/quota.json" ]]; then
+if [[ -s "$FAKE_HOME/Library/Caches/ration/quota.json" ]]; then
   PASS=$((PASS + 1))
 else
   FAIL=$((FAIL + 1))
@@ -215,25 +222,25 @@ run_plugin
 expect_contains "GitHub is unreachable and no cached data yet"
 expect_not_contains "Sign in with GitHub"
 
-# QUOTAPACE_TIMEOUT=1 shrinks the watchdog so these stay fast; the stubs
+# RATION_TIMEOUT=1 shrinks the watchdog so these stay fast; the stubs
 # sleep past it to simulate a stalled network call.
 begin "hung gh call times out instead of hanging the refresh"
 make_gh "sleep 2; echo 'never arrives'; exit 0"
-run_plugin QUOTAPACE_TIMEOUT=1
+run_plugin RATION_TIMEOUT=1
 expect_contains "GitHub is unreachable and no cached data yet"
 expect_contains "gh api gave no response within 1s"
 
 begin "hung gh call falls back to cached data"
 seed_copilot_cache
 make_gh "sleep 2; echo 'never arrives'; exit 0"
-run_plugin QUOTAPACE_TIMEOUT=1
+run_plugin RATION_TIMEOUT=1
 expect_contains "Offline · cached data from"
 expect_contains "25% used"
 
 begin "hung antigravity CLI times out and degrades to one line"
 make_gh_ok
 make_agy "sleep 2; exit 0"
-run_plugin QUOTAPACE_TIMEOUT=1
+run_plugin RATION_TIMEOUT=1
 expect_contains "Quota unavailable · try: antigravity-usage doctor"
 
 begin "HTTP 401 asks to sign in again"
@@ -250,7 +257,7 @@ expect_not_contains "sign-in expired"
 begin "signed out with no history shows first-run guidance"
 make_gh "exit 0"
 run_plugin AUTH_EXIT=1
-expect_contains "No AI quota sources detected"
+expect_contains "Nothing to ration yet · no AI quota sources detected"
 expect_contains "gh auth login"
 expect_contains "antigravity-usage login"
 
@@ -263,11 +270,11 @@ expect_contains "Not signed in to GitHub"
 begin "nothing installed shows first-run guidance"
 GH_STUB=""
 run_plugin
-expect_contains "No AI quota sources detected"
+expect_contains "Nothing to ration yet · no AI quota sources detected"
 
 begin "missing jq names the fix"
 GH_STUB=""
-run_plugin QUOTAPACE_JQ=
+run_plugin RATION_JQ=
 expect_contains "Missing dependencies: jq"
 expect_contains "brew install jq"
 
