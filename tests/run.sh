@@ -329,8 +329,12 @@ expect_not_contains "sign-in expired"
 begin "signed out with no history shows first-run guidance"
 make_gh "exit 0"
 run_plugin AUTH_EXIT=1
-expect_contains "Nothing to ration yet · no AI quota sources detected"
+expect_contains "First-time setup · choose at least one quota source"
+expect_contains "App requirements"
+expect_contains "macOS · SwiftBar · jq"
+expect_contains "GitHub CLI + active Copilot seat"
 expect_contains "gh auth login"
+expect_contains "signed-in local app or CLI"
 expect_contains "antigravity-usage login"
 
 begin "signed out with a cache still prompts to sign back in"
@@ -342,7 +346,17 @@ expect_contains "Not signed in to GitHub"
 begin "nothing installed shows first-run guidance"
 GH_STUB=""
 run_plugin
-expect_contains "Nothing to ration yet · no AI quota sources detected"
+expect_contains "First-time setup · choose at least one quota source"
+
+begin "README gives first-time requirements"
+expect_check "README has no first-time checklist" grep -qF \
+  "### First-time checklist" "$ROOT/README.md"
+expect_check "README omits the provider choice requirement" grep -qF \
+  "Set up at least one quota source" "$ROOT/README.md"
+expect_check "README omits the Copilot seat requirement" grep -qF \
+  "active Copilot seat" "$ROOT/README.md"
+expect_check "README omits the Codex sign-in requirement" grep -qF \
+  "Codex app or CLI" "$ROOT/README.md"
 
 begin "missing jq names the fix"
 GH_STUB=""

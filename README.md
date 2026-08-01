@@ -25,7 +25,18 @@ Every bar has a tick (`│`). The tick is your fair share for right now, where u
 
 ## Install
 
-You'll need macOS with [SwiftBar](https://github.com/swiftbar/SwiftBar) (`brew install --cask swiftbar`), `jq` (`brew install jq`), and at least one provider set up (see below).
+### First-time checklist
+
+Before installing, confirm these requirements:
+
+- **App:** macOS, [SwiftBar](https://github.com/swiftbar/SwiftBar) (`brew install --cask swiftbar`), and `jq` (`brew install jq`).
+- **Installer:** `git` is needed for the commands below. Homebrew is optional and only used by the example install commands.
+- **Quota source:** Set up at least one quota source. Providers work independently, so you don't need all three:
+  - **Copilot:** [GitHub CLI](https://cli.github.com/) signed in with `gh auth login` and an active Copilot seat.
+  - **Codex:** a signed-in Codex app or CLI and one completed response. For the CLI, run `codex login` before using Codex.
+  - **Antigravity:** Node.js/npm plus [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage), installed with `npm install -g antigravity-usage` and signed in with `antigravity-usage login`.
+
+Ration doesn't need API keys. It uses each provider's existing local sign-in or session data.
 
 ```bash
 git clone https://github.com/shkao/ration.git
@@ -50,7 +61,7 @@ SWIFTBAR_PLUGIN_DIR="$HOME/path/to/swiftbar-plugins" ./install.sh
 Ration shows a section for each provider you already use, and setup instructions when it finds none. Each provider works independently.
 
 - **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
-- **Codex** needs one completed Codex response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
+- **Codex** needs a signed-in Codex app or CLI and one completed response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
 - **Antigravity** needs the [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) CLI (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`). It reports two weekly quotas: all Gemini models share one, all Claude and GPT models share the other.
 
 ## Why "Ration"

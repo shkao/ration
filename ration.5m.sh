@@ -320,7 +320,7 @@ antigravity_takeover() { return 1; }
 antigravity_settings() { :; }
 antigravity_present() { [[ "$AGY_STATE" != "absent" ]]; }
 antigravity_welcome() {
-  echo "For Antigravity: | size=12"
+  echo "For Antigravity (Node.js/npm): | size=12"
   echo "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}"
 }
 
@@ -457,8 +457,8 @@ codex_takeover() { return 1; }
 codex_settings() { :; }
 codex_present() { [[ "$CODEX_STATE" != "absent" ]]; }
 codex_welcome() {
-  echo "For Codex: | size=12"
-  echo "Use Codex once to create a local usage snapshot | size=11 color=${SECONDARY_COLOR}"
+  echo "For Codex (signed-in local app or CLI): | size=12"
+  echo "Complete one response to create a usage snapshot | size=11 color=${SECONDARY_COLOR}"
 }
 
 # Shared chrome for full-menu (takeover) screens: menu bar glyph, app header,
@@ -728,7 +728,7 @@ copilot_present() { [[ "$CP_STATE" != "absent" ]]; }
 copilot_welcome() {
   local hint="brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
   [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]] && hint="$(signin_item)"
-  echo "For GitHub Copilot: | size=12"
+  echo "For GitHub Copilot (GitHub CLI + active Copilot seat): | size=12"
   echo "$hint"
 }
 
@@ -739,8 +739,12 @@ print_welcome_menu() {
     welcome_lines+=("$(provider_call "$provider" welcome)")
   done
   print_takeover_menu "? | size=12.5 sfimage=gauge" \
-    "Nothing to ration yet · no AI quota sources detected | color=${ORANGE} size=12" \
-    "---" "${welcome_lines[@]}"
+    "First-time setup · choose at least one quota source | color=${ORANGE} size=12" \
+    "---" \
+    "App requirements | size=12" \
+    "macOS · SwiftBar · jq | size=11 color=${SECONDARY_COLOR}" \
+    "Quota source · set up one below | size=12" \
+    "${welcome_lines[@]}"
 }
 
 PROVIDER_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ration.XXXXXX" 2>/dev/null)"
