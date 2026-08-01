@@ -8,12 +8,12 @@
   <img src="https://img.shields.io/badge/Platform-macOS-lightgrey.svg" alt="Platform: macOS">
 </p>
 
-Your employer hands you a fixed ration of AI requests: GitHub Copilot premium requests, Google Antigravity model quotas. Nothing warns you when you're spending it too fast, so you find out you've run out the hard way, when a request gets refused days before the reset. Ration keeps that number in your macOS menu bar and turns it orange, then red, the moment you're ahead of pace. It's a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that installs in three commands and shows a section for each provider you use.
+Your employer hands you a fixed ration of AI requests: GitHub Copilot premium requests, Codex usage limits, Google Antigravity model quotas. Nothing warns you when you're spending it too fast, so you find out you've run out the hard way, when a request gets refused days before the reset. Ration keeps that number in your macOS menu bar and turns it orange, then red, the moment you're ahead of pace. It's a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that installs in three commands and shows a section for each provider you use.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/ration-dark.png">
-    <img src="assets/ration-light.png" alt="Ration's menu bar dropdown: an exhausted red Copilot bar at 100% used, two green Antigravity bars, reset dates, and a 'Ration exhausted, see you on reset day' status" width="330">
+    <img src="assets/ration-light.png" alt="Ration's menu bar dropdown with Copilot, Codex, and Antigravity quota bars, reset times, and an overall pace status" width="330">
   </picture>
 </p>
 
@@ -33,13 +33,24 @@ cd ration
 ./install.sh
 ```
 
-Then point SwiftBar at the plugin folder `install.sh` prints (Preferences > Plugins > Plugin Folder). Coming from QuotaPace? `install.sh` clears the old plugin first, so SwiftBar won't run both.
+Then point SwiftBar at the plugin folder `install.sh` prints (Preferences > Plugins > Plugin Folder). The default is `~/.swiftbar-plugins`; set `SWIFTBAR_PLUGIN_DIR` when running the installer to choose another folder. Coming from QuotaPace? `install.sh` clears the old plugin first, so SwiftBar won't run both.
+
+### Reproducible setup
+
+The checkout contains no account data or machine-specific settings. `install.sh` derives the helper, cache, and default plugin paths from each user's `HOME`; `SWIFTBAR_PLUGIN_DIR` is the only install setting. It copies the plugin and login helper but never copies quota caches or Codex sessions, so every installation reads that user's signed-in providers at runtime.
+
+For the default layout on any account, run the same `./install.sh` command above and select the printed `~/.swiftbar-plugins` folder in SwiftBar. For a managed or shared folder, use the same explicit value on each machine:
+
+```bash
+SWIFTBAR_PLUGIN_DIR="$HOME/path/to/swiftbar-plugins" ./install.sh
+```
 
 ## What it tracks
 
-Ration shows a section for each provider you already use, and setup instructions when you use neither. Neither provider needs the other, so you can run it with just one.
+Ration shows a section for each provider you already use, and setup instructions when it finds none. Each provider works independently.
 
 - **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
+- **Codex** needs one completed Codex response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
 - **Antigravity** needs the [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) CLI (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`). It reports two weekly quotas: all Gemini models share one, all Claude and GPT models share the other.
 
 ## Why "Ration"
@@ -50,14 +61,15 @@ That's the whole app. The tick is today's fair share. Fill past it is bread eate
 
 ## How it works
 
-Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own Copilot clients use, and refreshes every 5 minutes (the `5m` in `ration.5m.sh`, per SwiftBar's naming). That endpoint reports only a live snapshot, so Ration works out your pace locally by assuming a monthly cycle ending on the reported reset date.
+Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own Copilot clients use, and refreshes every 5 minutes (the `5m` in `ration.5m.sh`, per SwiftBar's naming). It also reads the newest Codex rate-limit snapshot on disk. These sources report snapshots, so Ration works out pace locally from each limit's reset time and window length.
 
-It caches the last good response at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration only asks you to sign in when GitHub actually rejects your token.
+It caches the last good provider responses at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration asks you to sign in when a previously detected Copilot account has no local token or GitHub rejects that token.
 
 ## Caveats
 
 - `/copilot_internal/user` is undocumented and could change without notice.
 - Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
+- Codex usage updates only after Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
 - The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.
 
 ## Testing
@@ -66,9 +78,11 @@ It caches the last good response at `~/Library/Caches/ration/`. When GitHub is u
 ./tests/run.sh
 ```
 
-The suite runs the real plugin end to end against stub `gh` and `antigravity-usage` binaries in an isolated `$HOME`. It covers the happy path, pace escalation, the exhausted state, every error branch (offline, stalled calls, expired token, no Copilot seat, missing dependencies), and both cache fallbacks. CI runs it on a macOS runner and shellcheck on Linux.
+The suite runs the real plugin end to end against stub Copilot and Antigravity commands plus Codex session fixtures in an isolated `$HOME`. It covers provider combinations, pace escalation, exhausted states, Codex snapshot shapes, every error branch (offline, stalled calls, expired token, no Copilot seat, missing dependencies), concurrent fetches, both cache fallbacks, and installation into a custom per-user plugin folder. CI runs it on a macOS runner and ShellCheck on Linux.
 
 ## Uninstall
+
+These commands use the default plugin folder. If you installed into a custom `SWIFTBAR_PLUGIN_DIR`, remove `ration.5m.sh` there instead.
 
 ```bash
 rm ~/.swiftbar-plugins/ration.5m.sh
@@ -82,7 +96,7 @@ rm -rf ~/.ration-helpers ~/Library/Caches/ration
 ration.5m.sh              the plugin, everything in one file by design
 helpers/ration-login.sh   "Sign in with GitHub…" recovery action
 install.sh                copies both files into place
-tests/run.sh              integration tests (stubbed gh, isolated $HOME)
+tests/run.sh              integration tests (provider fixtures, isolated $HOME)
 .github/workflows/ci.yml  shellcheck on Linux, tests on macOS
 ```
 

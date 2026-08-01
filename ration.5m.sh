@@ -1,10 +1,10 @@
 #!/bin/bash
 # <xbar.title>Ration</xbar.title>
-# <xbar.version>v3.0</xbar.version>
+# <xbar.version>v3.1</xbar.version>
 # <xbar.author>Allen Kao</xbar.author>
 # <xbar.author.github>shkao</xbar.author.github>
-# <xbar.desc>Rations your AI quotas: tracks Copilot and Antigravity pace so they last until reset</xbar.desc>
-# <xbar.dependencies>gh,jq,awk</xbar.dependencies>
+# <xbar.desc>Rations your AI quotas: tracks Copilot, Codex, and Antigravity pace so they last until reset</xbar.desc>
+# <xbar.dependencies>jq,awk</xbar.dependencies>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 
@@ -40,6 +40,8 @@ BAR_WIDTH=16
 # Last successful API response, so going offline shows stale data instead of errors.
 CACHE_DIR="${HOME}/Library/Caches/ration"
 CACHE_FILE="${CACHE_DIR}/quota.json"
+CODEX_HOME="${HOME}/.codex"
+CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
 
 # macOS has no `timeout`; without one a stalled network call would hang the
 # SwiftBar refresh indefinitely. The watchdog's output goes to /dev/null so
@@ -69,6 +71,12 @@ sanitize_error() {
   local text="${1//$'\n'/ }"
   text="${text//|/-}"
   printf '%.160s' "$text"
+}
+
+write_cache() {
+  local path="$1" contents="$2"
+  mkdir -p "$CACHE_DIR" 2>/dev/null
+  printf '%s\n' "$contents" > "${path}.tmp" 2>/dev/null && mv -f "${path}.tmp" "$path" 2>/dev/null
 }
 
 # Marker is "│" (U+2502), not ASCII "|": a literal pipe would start the
@@ -126,10 +134,23 @@ print_limit_line() {
     "${label}:" "$bar" "$rounded" "$color"
 }
 
+print_quota_rows() {
+  local rows="$1" label used reset_epoch elapsed
+  while IFS=$'\t' read -r label used reset_epoch elapsed; do
+    [[ -z "$label" ]] && continue
+    print_limit_line "$label" "$used" "$(pace_color "$used" "$elapsed")" "$elapsed"
+    echo "Resets $(format_reset "$reset_epoch") | size=11 color=${SECONDARY_COLOR}"
+  done <<< "$rows"
+}
+
 # Same thresholds as the Copilot menu bar status: color by how far usage
 # runs ahead of the time already elapsed in the quota window.
 pace_color() {
   local used="$1" elapsed="$2" diff
+  if float_gt "$used" 99.999; then
+    echo "$RED"
+    return
+  fi
   diff="$(awk -v u="$used" -v e="$elapsed" 'BEGIN { printf "%.4f", u - e }')"
   if float_gt "$diff" 30; then echo "$RED"
   elif float_gt "$diff" 15; then echo "$ORANGE"
@@ -146,6 +167,30 @@ color_rank() {
     "$YELLOW") echo 1 ;;
     *) echo 0 ;;
   esac
+}
+
+update_header_from_rows() {
+  local provider="$1" rows="$2" label used elapsed quota_color quota_rank current_rank exhausted
+  while IFS=$'\t' read -r label used _ elapsed; do
+    [[ -z "$label" ]] && continue
+    quota_color="$(pace_color "$used" "$elapsed")"
+    quota_rank="$(color_rank "$quota_color")"
+    current_rank="$(color_rank "$HEADER_COLOR")"
+    exhausted=false
+    float_gt "$used" 99.999 && exhausted=true
+    if (( quota_rank > current_rank )) || [[ "$exhausted" == true && "$quota_rank" == "$current_rank" ]]; then
+      HEADER_COLOR="$quota_color"
+      if [[ "$exhausted" == true ]]; then
+        HEADER_STATUS="${provider} ${label} exhausted · see you on reset day"
+      else
+        case "$quota_rank" in
+          3) HEADER_STATUS="${provider} ${label} burning fast" ;;
+          2) HEADER_STATUS="${provider} ${label} over pace" ;;
+          1) HEADER_STATUS="${provider} ${label} slightly over pace" ;;
+        esac
+      fi
+    fi
+  done <<< "$rows"
 }
 
 # Antigravity quota via the antigravity-usage CLI (npm). All Gemini models
@@ -190,8 +235,7 @@ fetch_antigravity() {
   json="$(run_with_timeout "$agy_bin" --json 2>/dev/null)"
   [[ -n "$json" ]] && parsed="$(parse_antigravity <<< "$json")"
   if [[ -n "$parsed" ]]; then
-    mkdir -p "$CACHE_DIR" 2>/dev/null
-    printf '%s\n' "$json" > "${agy_cache}.tmp" 2>/dev/null && mv -f "${agy_cache}.tmp" "$agy_cache" 2>/dev/null
+    write_cache "$agy_cache" "$json"
   elif [[ -s "$agy_cache" ]]; then
     parsed="$(parse_antigravity < "$agy_cache")"
     if [[ -z "$parsed" ]]; then
@@ -219,16 +263,129 @@ print_antigravity_section() {
     return 0
   fi
 
-  local label used reset_epoch elapsed
-  while IFS=$'\t' read -r label used reset_epoch elapsed; do
-    [[ -z "$label" ]] && continue
-    print_limit_line "$label" "$used" "$(pace_color "$used" "$elapsed")" "$elapsed"
-    echo "Resets $(format_reset "$reset_epoch") | size=11 color=${SECONDARY_COLOR}"
-  done <<< "$AGY_ROWS"
+  print_quota_rows "$AGY_ROWS"
 
   local note="$AGY_EMAIL"
   [[ -n "$AGY_ASOF" ]] && note="${note:+${note} · }cached from ${AGY_ASOF}"
   [[ -n "$note" ]] && echo "${note} | size=11 color=${SECONDARY_COLOR}"
+}
+
+# Codex writes the rate limits returned with each response into its local
+# session JSONL. These are Codex limits, not ChatGPT web model limits.
+CODEX_STATE="absent" # absent | ok
+CODEX_ROWS=""        # one window per line: label, used%, reset epoch, elapsed%
+CODEX_PLAN=""
+codex_candidate_files() {
+  local -a session_days=("$CODEX_HOME"/sessions/*/*/*)
+  local -a files
+  local day file
+  local day_count=0 file_count=0
+  local i j
+
+  # Session paths contain sortable YYYY/MM/DD and rollout timestamps. Inspect
+  # at most 20 sessions from each of the newest three active days.
+  for ((i = ${#session_days[@]} - 1; i >= 0 && day_count < 3; i--)); do
+    day="${session_days[$i]}"
+    [[ -d "$day" ]] || continue
+    day_count=$((day_count + 1))
+    files=("$day"/*.jsonl)
+    file_count=0
+    for ((j = ${#files[@]} - 1; j >= 0 && file_count < 20; j--)); do
+      file="${files[$j]}"
+      [[ -f "$file" ]] || continue
+      printf '%s\n' "$file"
+      file_count=$((file_count + 1))
+    done
+  done
+
+  # Older Codex versions move sessions into one archive directory. The
+  # timestamped filenames keep the newest 20 selectable without reading them.
+  files=("$CODEX_HOME"/archived_sessions/*.jsonl)
+  file_count=0
+  for ((j = ${#files[@]} - 1; j >= 0 && file_count < 20; j--)); do
+    file="${files[$j]}"
+    [[ -f "$file" ]] || continue
+    printf '%s\n' "$file"
+    file_count=$((file_count + 1))
+  done
+}
+
+fetch_codex() {
+  local candidate_files signature cached_signature file parsed=""
+  candidate_files="$(codex_candidate_files)"
+  [[ -z "$candidate_files" ]] && return 0
+  signature="$(while IFS= read -r file; do
+    stat -f '%m:%z:%N' "$file" 2>/dev/null
+  done <<< "$candidate_files" | cksum | awk '{ print $1 ":" $2 }')"
+
+  if [[ -s "$CODEX_CACHE_FILE" ]]; then
+    cached_signature="$(sed -n '1p' "$CODEX_CACHE_FILE")"
+    if [[ "$cached_signature" == "$signature" ]]; then
+      parsed="$(sed -n '2p' "$CODEX_CACHE_FILE")"
+    fi
+  fi
+
+  if [[ "$cached_signature" != "$signature" ]]; then
+    while IFS= read -r file; do
+      parsed="$(tail -r "$file" 2>/dev/null | "$JQ_BIN" -r '
+        select(.type == "event_msg" and .payload.type == "token_count")
+        | .payload.rate_limits
+        | select(.limit_id == "codex" and .primary.used_percent != null)
+        | [(.plan_type // "__RATION_NO_PLAN__"),
+           .primary.used_percent, .primary.window_minutes, .primary.resets_at,
+           (.secondary.used_percent // ""), (.secondary.window_minutes // ""),
+           (.secondary.resets_at // "")]
+        | @tsv' 2>/dev/null | head -1)"
+      [[ -n "$parsed" ]] && break
+    done <<< "$candidate_files"
+    write_cache "$CODEX_CACHE_FILE" "${signature}"$'\n'"${parsed}"
+  fi
+  [[ -z "$parsed" ]] && return 0
+
+  local primary_used primary_window primary_reset secondary_used secondary_window secondary_reset
+  IFS=$'\t' read -r CODEX_PLAN primary_used primary_window primary_reset \
+    secondary_used secondary_window secondary_reset <<< "$parsed"
+  [[ "$CODEX_PLAN" == "__RATION_NO_PLAN__" ]] && CODEX_PLAN=""
+  local now elapsed label slot
+  now="$(date +%s)"
+  CODEX_ROWS=""
+  for slot in primary secondary; do
+    local used window reset
+    if [[ "$slot" == "primary" ]]; then
+      used="$primary_used"; window="$primary_window"; reset="$primary_reset"
+    else
+      used="$secondary_used"; window="$secondary_window"; reset="$secondary_reset"
+    fi
+    [[ -z "$used" || -z "$window" || -z "$reset" ]] && continue
+    elapsed="$(awk -v now="$now" -v reset="$reset" -v minutes="$window" 'BEGIN {
+      duration = minutes * 60
+      value = (now - (reset - duration)) * 100 / duration
+      if (value < 0) value = 0
+      if (value > 100) value = 100
+      printf "%.4f", value
+    }')"
+    case "$window" in
+      300) label="5 hours" ;;
+      10080) label="Weekly" ;;
+      *) label="${window} min" ;;
+    esac
+    CODEX_ROWS+="${CODEX_ROWS:+$'\n'}${label}"$'\t'"${used}"$'\t'"${reset}"$'\t'"${elapsed}"
+  done
+  [[ -z "$CODEX_ROWS" ]] && return 0
+  CODEX_STATE="ok"
+}
+
+print_codex_section() {
+  [[ "$CODEX_STATE" != "ok" ]] && return 0
+  echo "---"
+  echo "**Codex** | md=true size=13"
+  print_quota_rows "$CODEX_ROWS"
+  local plan_display
+  plan_display="$(awk -v plan="$CODEX_PLAN" 'BEGIN {
+    if (plan == "") print "ChatGPT"
+    else print "ChatGPT " toupper(substr(plan, 1, 1)) substr(plan, 2)
+  }')"
+  echo "${plan_display} · local Codex snapshot | size=11 color=${SECONDARY_COLOR}"
 }
 
 # Shared chrome for full-menu (takeover) screens: menu bar glyph, app header,
@@ -284,6 +441,7 @@ print_signin_menu() {
 CP_STATE="absent" # absent | ok | offline | signedout | expired | nocopilot | unreachable | badresponse
 CP_ERR=""
 OFFLINE_ASOF=""
+RESPONSE=""
 # Single home for state copy rendered both as a section line and a takeover menu.
 CP_MSG_UNREACHABLE="GitHub is unreachable and no cached data yet"
 CP_MSG_BADRESPONSE="Unexpected response from Copilot API"
@@ -353,8 +511,7 @@ fi
 # Only a fresh, validated response refreshes the cache; atomic so a killed
 # run can't leave a truncated file behind.
 if [[ -z "$OFFLINE_ASOF" ]]; then
-  mkdir -p "$CACHE_DIR" 2>/dev/null
-  printf '%s\n' "$RESPONSE" > "${CACHE_FILE}.tmp" 2>/dev/null && mv -f "${CACHE_FILE}.tmp" "$CACHE_FILE" 2>/dev/null
+  write_cache "$CACHE_FILE" "$RESPONSE"
 fi
 
 # Billing period end = quota_reset_date_utc; assume a monthly cycle, so
@@ -448,20 +605,54 @@ print_welcome_menu() {
     "For GitHub Copilot: | size=12" \
     "$copilot_hint" \
     "For Antigravity: | size=12" \
-    "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}"
+    "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}" \
+    "For Codex: | size=12" \
+    "Use Codex once to create a local usage snapshot | size=11 color=${SECONDARY_COLOR}"
 }
 
-fetch_copilot
+PROVIDER_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ration.XXXXXX" 2>/dev/null)"
+if [[ -n "$PROVIDER_STATE_DIR" ]]; then
+  trap 'rm -rf "$PROVIDER_STATE_DIR"' EXIT
+  (
+    fetch_copilot
+    declare -p CP_STATE CP_ERR OFFLINE_ASOF RESPONSE > "$PROVIDER_STATE_DIR/copilot"
+  ) &
+  CP_FETCH_PID=$!
+  (
+    fetch_antigravity
+    declare -p AGY_STATE AGY_ROWS AGY_EMAIL AGY_ASOF > "$PROVIDER_STATE_DIR/antigravity"
+  ) &
+  AGY_FETCH_PID=$!
+  (
+    fetch_codex
+    declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN > "$PROVIDER_STATE_DIR/codex"
+  ) &
+  CODEX_FETCH_PID=$!
+  wait "$CP_FETCH_PID"
+  wait "$AGY_FETCH_PID"
+  wait "$CODEX_FETCH_PID"
+  # shellcheck disable=SC1091
+  source "$PROVIDER_STATE_DIR/copilot"
+  # shellcheck disable=SC1091
+  source "$PROVIDER_STATE_DIR/antigravity"
+  # shellcheck disable=SC1091
+  source "$PROVIDER_STATE_DIR/codex"
+  rm -rf "$PROVIDER_STATE_DIR"
+  trap - EXIT
+else
+  fetch_copilot
+  fetch_antigravity
+  fetch_codex
+fi
 if cp_has_data; then
   compute_copilot
 fi
-fetch_antigravity
 
 # When Copilot is in a problem state and no other provider has data, keep the
 # dedicated full-menu treatment: it is unambiguous and actionable. With
-# Antigravity data present, the same states shrink to lines inside the
+# other provider data present, the same states shrink to lines inside the
 # Copilot section so the working provider stays visible.
-if [[ "$AGY_STATE" != "ok" ]]; then
+if [[ "$AGY_STATE" != "ok" && "$CODEX_STATE" != "ok" ]]; then
   case "$CP_STATE" in
     signedout)
       print_signin_menu "Not signed in to GitHub"
@@ -492,7 +683,7 @@ if [[ "$AGY_STATE" != "ok" ]]; then
       exit 0
       ;;
     absent)
-      if [[ "$AGY_STATE" == "absent" ]]; then
+      if [[ "$AGY_STATE" == "absent" && "$CODEX_STATE" == "absent" ]]; then
         print_welcome_menu
         exit 0
       fi
@@ -510,37 +701,29 @@ if cp_has_data; then
   HEADER_STATUS="$STATUS"
 fi
 if [[ "$AGY_STATE" == "ok" ]]; then
-  while IFS=$'\t' read -r AGY_LABEL AGY_USED _ AGY_ELAPSED; do
-    [[ -z "$AGY_LABEL" ]] && continue
-    AGY_COLOR="$(pace_color "$AGY_USED" "$AGY_ELAPSED")"
-    AGY_RANK="$(color_rank "$AGY_COLOR")"
-    if (( AGY_RANK > $(color_rank "$HEADER_COLOR") )); then
-      HEADER_COLOR="$AGY_COLOR"
-      case "$AGY_RANK" in
-        3) HEADER_STATUS="Antigravity ${AGY_LABEL} burning fast" ;;
-        2) HEADER_STATUS="Antigravity ${AGY_LABEL} over pace" ;;
-        1) HEADER_STATUS="Antigravity ${AGY_LABEL} slightly over pace" ;;
-      esac
-    fi
-  done <<< "$AGY_ROWS"
-  if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]]; then
-    HEADER_STATUS="All rations on pace"
-  fi
+  update_header_from_rows "Antigravity" "$AGY_ROWS"
+fi
+if [[ "$CODEX_STATE" == "ok" ]]; then
+  update_header_from_rows "Codex" "$CODEX_ROWS"
+fi
+if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]] && \
+   [[ "$AGY_STATE" == "ok" || "$CODEX_STATE" == "ok" ]]; then
+  HEADER_STATUS="All rations on pace"
 fi
 
-if ! cp_has_data && [[ "$AGY_STATE" != "ok" ]]; then
-  # Reachable only when Copilot is absent and the Antigravity CLI errored.
+if ! cp_has_data && [[ "$AGY_STATE" != "ok" && "$CODEX_STATE" != "ok" ]]; then
+  # Reachable only when no provider has quota data.
   HEADER_COLOR="$ORANGE"
   HEADER_STATUS="No quota data"
 fi
 
-# Menu bar percent: Copilot when it has data, else the busiest Antigravity group.
-if ! cp_has_data; then
-  PERCENT_TITLE=""
-  if [[ "$AGY_STATE" == "ok" ]]; then
-    PERCENT_TITLE="$(awk -F'\t' '$2 > m { m = $2 } END { printf "%.0f", m }' <<< "$AGY_ROWS")"
-  fi
-fi
+# Menu bar percent: the busiest quota across every provider with data.
+PERCENT_TITLE="$({
+  if cp_has_data; then printf 'Copilot\t%s\n' "$ACTUAL_USED_PCT"; fi
+  if [[ "$CODEX_STATE" == "ok" ]]; then printf '%s\n' "$CODEX_ROWS"; fi
+  if [[ "$AGY_STATE" == "ok" ]]; then printf '%s\n' "$AGY_ROWS"; fi
+} | awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
+  END { if (seen) printf "%.0f", max }')"
 
 # Smaller than the native menu bar font size (14) — per user preference.
 TITLE_PARAMS="size=12.5"
@@ -570,6 +753,7 @@ if [[ -n "$OFFLINE_ASOF" ]]; then
   echo "Offline · cached data from ${OFFLINE_ASOF} | size=11 color=${SECONDARY_COLOR}"
 fi
 print_copilot_section
+print_codex_section
 print_antigravity_section
 echo "---"
 echo "Refresh | refresh=true sfimage=arrow.clockwise"
