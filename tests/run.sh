@@ -472,6 +472,19 @@ expect_contains "**Copilot**"
 expect_contains "GitHub sign-in expired"
 expect_contains "**Antigravity**"
 
+begin "all providers implement the shared lifecycle contract"
+expect_check "provider registry is missing" grep -qF \
+  'PROVIDERS=("copilot" "codex" "antigravity")' "$PLUGIN"
+for provider in copilot codex antigravity; do
+  contract_ok=true
+  for hook in fetch export postprocess has_data rows update_header render takeover settings present welcome; do
+    grep -qE "^${provider}_${hook}\\(\\)" "$PLUGIN" || contract_ok=false
+  done
+  expect_check "${provider} provider contract is incomplete" test "$contract_ok" = true
+done
+expect_check "welcome menu bypasses shared takeover chrome" sh -c \
+  "sed -n '/^print_welcome_menu()/,/^}/p' '$PLUGIN' | grep -q 'print_takeover_menu'"
+
 begin "installer reproduces an isolated per-user setup"
 PLUGIN_DIR="$FAKE_HOME/custom swiftbar plugins"
 mkdir -p "$PLUGIN_DIR" "$FAKE_HOME/.quotapace-helpers"

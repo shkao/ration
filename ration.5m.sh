@@ -36,12 +36,47 @@ BLUE="#0969da,#58a6ff"
 # on every SwiftBar launch instead of only when the user clicks the menu item.
 LOGIN_SCRIPT="${HOME}/.ration-helpers/ration-login.sh"
 BAR_WIDTH=16
+PROVIDERS=("copilot" "codex" "antigravity")
 
 # Last successful API response, so going offline shows stale data instead of errors.
 CACHE_DIR="${HOME}/Library/Caches/ration"
 CACHE_FILE="${CACHE_DIR}/quota.json"
 CODEX_HOME="${HOME}/.codex"
 CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
+
+# Provider contract: <id>_{fetch,export,postprocess,has_data,rows,
+# update_header,render,takeover,settings,present,welcome}. Main orchestration
+# dispatches only through these hooks; source-specific behavior stays private.
+provider_call() {
+  local provider="$1" hook="$2"
+  shift 2
+  "${provider}_${hook}" "$@"
+}
+
+provider_any_data() {
+  local provider
+  for provider in "${PROVIDERS[@]}"; do
+    provider_call "$provider" has_data && return 0
+  done
+  return 1
+}
+
+provider_any_data_except() {
+  local excluded="$1" provider
+  for provider in "${PROVIDERS[@]}"; do
+    [[ "$provider" == "$excluded" ]] && continue
+    provider_call "$provider" has_data && return 0
+  done
+  return 1
+}
+
+provider_any_present() {
+  local provider
+  for provider in "${PROVIDERS[@]}"; do
+    provider_call "$provider" present && return 0
+  done
+  return 1
+}
 
 # macOS has no `timeout`; without one a stalled network call would hang the
 # SwiftBar refresh indefinitely. The watchdog's output goes to /dev/null so
@@ -221,7 +256,7 @@ parse_antigravity() {
        | @tsv)' 2>/dev/null
 }
 
-fetch_antigravity() {
+antigravity_fetch() {
   local agy_bin
   agy_bin="${RATION_AGY-$(command -v antigravity-usage)}"
   if [[ -z "$agy_bin" ]]; then
@@ -254,7 +289,18 @@ fetch_antigravity() {
   [[ "$parsed" == *$'\n'* ]] && AGY_ROWS="${parsed#*$'\n'}"
 }
 
-print_antigravity_section() {
+antigravity_export() {
+  declare -p AGY_STATE AGY_ROWS AGY_EMAIL AGY_ASOF
+}
+
+antigravity_postprocess() { :; }
+antigravity_has_data() { [[ "$AGY_STATE" == "ok" ]]; }
+antigravity_rows() { antigravity_has_data && printf '%s\n' "$AGY_ROWS"; }
+antigravity_update_header() {
+  antigravity_has_data && update_header_from_rows "Antigravity" "$AGY_ROWS"
+}
+
+antigravity_render() {
   [[ "$AGY_STATE" == "absent" ]] && return 0
   echo "---"
   echo "**Antigravity** | md=true size=13"
@@ -268,6 +314,14 @@ print_antigravity_section() {
   local note="$AGY_EMAIL"
   [[ -n "$AGY_ASOF" ]] && note="${note:+${note} · }cached from ${AGY_ASOF}"
   [[ -n "$note" ]] && echo "${note} | size=11 color=${SECONDARY_COLOR}"
+}
+
+antigravity_takeover() { return 1; }
+antigravity_settings() { :; }
+antigravity_present() { [[ "$AGY_STATE" != "absent" ]]; }
+antigravity_welcome() {
+  echo "For Antigravity: | size=12"
+  echo "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}"
 }
 
 # Codex writes the rate limits returned with each response into its local
@@ -310,7 +364,7 @@ codex_candidate_files() {
   done
 }
 
-fetch_codex() {
+codex_fetch() {
   local candidate_files signature cached_signature file parsed=""
   candidate_files="$(codex_candidate_files)"
   [[ -z "$candidate_files" ]] && return 0
@@ -375,7 +429,18 @@ fetch_codex() {
   CODEX_STATE="ok"
 }
 
-print_codex_section() {
+codex_export() {
+  declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN
+}
+
+codex_postprocess() { :; }
+codex_has_data() { [[ "$CODEX_STATE" == "ok" ]]; }
+codex_rows() { codex_has_data && printf '%s\n' "$CODEX_ROWS"; }
+codex_update_header() {
+  codex_has_data && update_header_from_rows "Codex" "$CODEX_ROWS"
+}
+
+codex_render() {
   [[ "$CODEX_STATE" != "ok" ]] && return 0
   echo "---"
   echo "**Codex** | md=true size=13"
@@ -386,6 +451,14 @@ print_codex_section() {
     else print "ChatGPT " toupper(substr(plan, 1, 1)) substr(plan, 2)
   }')"
   echo "${plan_display} · local Codex snapshot | size=11 color=${SECONDARY_COLOR}"
+}
+
+codex_takeover() { return 1; }
+codex_settings() { :; }
+codex_present() { [[ "$CODEX_STATE" != "absent" ]]; }
+codex_welcome() {
+  echo "For Codex: | size=12"
+  echo "Use Codex once to create a local usage snapshot | size=11 color=${SECONDARY_COLOR}"
 }
 
 # Shared chrome for full-menu (takeover) screens: menu bar glyph, app header,
@@ -445,7 +518,7 @@ RESPONSE=""
 # Single home for state copy rendered both as a section line and a takeover menu.
 CP_MSG_UNREACHABLE="GitHub is unreachable and no cached data yet"
 CP_MSG_BADRESPONSE="Unexpected response from Copilot API"
-fetch_copilot() {
+copilot_fetch() {
   [[ -z "$GH_BIN" ]] && return 0
 
   # `gh auth token` only reads local credentials; `gh auth status` hits the
@@ -484,9 +557,14 @@ fetch_copilot() {
   fi
 }
 
+copilot_export() {
+  declare -p CP_STATE CP_ERR OFFLINE_ASOF RESPONSE
+}
+
 # Parse the (fresh or cached) response and derive pace. Sets CP_STATE to
 # badresponse when the payload doesn't look like a Copilot quota snapshot.
-compute_copilot() {
+copilot_postprocess() {
+copilot_has_data || return 0
 # IFS must be a tab: fields like the org name can contain spaces, and default
 # word splitting would shift every field after them.
 IFS=$'\t' read -r LOGIN REMAINING ENTITLEMENT PERCENT_REMAINING RESET_UTC PLAN ORG <<EOF
@@ -560,10 +638,25 @@ if ! float_gt "$PERCENT_REMAINING" 0; then
 fi
 }
 
-cp_has_data() { [[ "$CP_STATE" == "ok" || "$CP_STATE" == "offline" ]]; }
+copilot_has_data() { [[ "$CP_STATE" == "ok" || "$CP_STATE" == "offline" ]]; }
 
-print_copilot_section() {
+copilot_rows() {
+  copilot_has_data && printf 'Monthly\t%s\t%s\t%s\n' "$ACTUAL_USED_PCT" "$EPOCH_END" "$ELAPSED_PCT"
+}
+
+copilot_update_header() {
+  if copilot_has_data; then
+    HEADER_COLOR="$COLOR"
+    HEADER_STATUS="$STATUS"
+  fi
+  [[ -n "$OFFLINE_ASOF" ]] && HEADER_ICON="wifi.slash"
+}
+
+copilot_render() {
   case "$CP_STATE" in absent | nocopilot) return 0 ;; esac
+  if [[ -n "$OFFLINE_ASOF" ]]; then
+    echo "Offline · cached data from ${OFFLINE_ASOF} | size=11 color=${SECONDARY_COLOR}"
+  fi
   echo "---"
   echo "**Copilot** | md=true size=13"
   case "$CP_STATE" in
@@ -595,100 +688,98 @@ print_copilot_section() {
   esac
 }
 
-# First-run guidance when no provider is detected at all.
-print_welcome_menu() {
-  local copilot_hint="brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
-  [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]] && copilot_hint="$(signin_item)"
-  print_takeover_menu "? | size=12.5 sfimage=gauge" \
-    "Nothing to ration yet · no AI quota sources detected | color=${ORANGE} size=12" \
-    "---" \
-    "For GitHub Copilot: | size=12" \
-    "$copilot_hint" \
-    "For Antigravity: | size=12" \
-    "npm install -g antigravity-usage && antigravity-usage login | font=Menlo size=11 color=${SECONDARY_COLOR}" \
-    "For Codex: | size=12" \
-    "Use Codex once to create a local usage snapshot | size=11 color=${SECONDARY_COLOR}"
-}
-
-PROVIDER_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ration.XXXXXX" 2>/dev/null)"
-if [[ -n "$PROVIDER_STATE_DIR" ]]; then
-  trap 'rm -rf "$PROVIDER_STATE_DIR"' EXIT
-  (
-    fetch_copilot
-    declare -p CP_STATE CP_ERR OFFLINE_ASOF RESPONSE > "$PROVIDER_STATE_DIR/copilot"
-  ) &
-  CP_FETCH_PID=$!
-  (
-    fetch_antigravity
-    declare -p AGY_STATE AGY_ROWS AGY_EMAIL AGY_ASOF > "$PROVIDER_STATE_DIR/antigravity"
-  ) &
-  AGY_FETCH_PID=$!
-  (
-    fetch_codex
-    declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN > "$PROVIDER_STATE_DIR/codex"
-  ) &
-  CODEX_FETCH_PID=$!
-  wait "$CP_FETCH_PID"
-  wait "$AGY_FETCH_PID"
-  wait "$CODEX_FETCH_PID"
-  # shellcheck disable=SC1091
-  source "$PROVIDER_STATE_DIR/copilot"
-  # shellcheck disable=SC1091
-  source "$PROVIDER_STATE_DIR/antigravity"
-  # shellcheck disable=SC1091
-  source "$PROVIDER_STATE_DIR/codex"
-  rm -rf "$PROVIDER_STATE_DIR"
-  trap - EXIT
-else
-  fetch_copilot
-  fetch_antigravity
-  fetch_codex
-fi
-if cp_has_data; then
-  compute_copilot
-fi
-
-# When Copilot is in a problem state and no other provider has data, keep the
-# dedicated full-menu treatment: it is unambiguous and actionable. With
-# other provider data present, the same states shrink to lines inside the
-# Copilot section so the working provider stays visible.
-if [[ "$AGY_STATE" != "ok" && "$CODEX_STATE" != "ok" ]]; then
+copilot_takeover() {
+  provider_any_data_except "copilot" && return 1
   case "$CP_STATE" in
     signedout)
       print_signin_menu "Not signed in to GitHub"
-      exit 0
       ;;
     expired)
       print_signin_menu "GitHub sign-in expired"
-      exit 0
       ;;
     nocopilot)
-      # Sign-in wouldn't fix a missing seat, so point at Copilot settings.
       print_takeover_menu "? | sfimage=exclamationmark.shield sfcolor=${ORANGE}" \
         "GitHub Copilot isn't enabled for this account | color=${ORANGE} size=12" \
         "---" \
         "Open Copilot settings | href=https://github.com/settings/copilot color=${BLUE} size=12 sfimage=gearshape"
-      exit 0
       ;;
     unreachable)
       print_takeover_menu "? | sfimage=wifi.slash sfcolor=${ORANGE}" \
         "${CP_MSG_UNREACHABLE} | color=${ORANGE} size=12" \
         "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
-      exit 0
       ;;
     badresponse)
       print_takeover_menu "? | sfimage=gauge" \
         "${CP_MSG_BADRESPONSE} | color=${RED} size=12" \
         "${CP_ERR} | font=Menlo size=10 color=${SECONDARY_COLOR}"
-      exit 0
       ;;
-    absent)
-      if [[ "$AGY_STATE" == "absent" && "$CODEX_STATE" == "absent" ]]; then
-        print_welcome_menu
-        exit 0
-      fi
-      ;;
+    *) return 1 ;;
   esac
+  return 0
+}
+
+copilot_settings() {
+  if [[ "$CP_STATE" != "absent" ]]; then
+    echo "Open Copilot settings | href=https://github.com/settings/copilot sfimage=gearshape"
+  fi
+}
+
+copilot_present() { [[ "$CP_STATE" != "absent" ]]; }
+copilot_welcome() {
+  local hint="brew install gh && gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}"
+  [[ -n "$GH_BIN" && -x "$LOGIN_SCRIPT" ]] && hint="$(signin_item)"
+  echo "For GitHub Copilot: | size=12"
+  echo "$hint"
+}
+
+# First-run guidance when no provider is detected at all.
+print_welcome_menu() {
+  local provider welcome_lines=()
+  for provider in "${PROVIDERS[@]}"; do
+    welcome_lines+=("$(provider_call "$provider" welcome)")
+  done
+  print_takeover_menu "? | size=12.5 sfimage=gauge" \
+    "Nothing to ration yet · no AI quota sources detected | color=${ORANGE} size=12" \
+    "---" "${welcome_lines[@]}"
+}
+
+PROVIDER_STATE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ration.XXXXXX" 2>/dev/null)"
+if [[ -n "$PROVIDER_STATE_DIR" ]]; then
+  trap 'rm -rf "$PROVIDER_STATE_DIR"' EXIT
+  PROVIDER_PIDS=()
+  for provider in "${PROVIDERS[@]}"; do
+    (
+      provider_call "$provider" fetch
+      provider_call "$provider" export > "$PROVIDER_STATE_DIR/$provider"
+    ) &
+    PROVIDER_PIDS+=("$!")
+  done
+  for pid in "${PROVIDER_PIDS[@]}"; do
+    wait "$pid"
+  done
+  for provider in "${PROVIDERS[@]}"; do
+    # shellcheck disable=SC1090
+    source "$PROVIDER_STATE_DIR/$provider"
+  done
+  rm -rf "$PROVIDER_STATE_DIR"
+  trap - EXIT
+else
+  for provider in "${PROVIDERS[@]}"; do
+    provider_call "$provider" fetch
+  done
+fi
+for provider in "${PROVIDERS[@]}"; do
+  provider_call "$provider" postprocess
+done
+
+for provider in "${PROVIDERS[@]}"; do
+  if provider_call "$provider" takeover; then
+    exit 0
+  fi
+done
+if ! provider_any_present; then
+  print_welcome_menu
+  exit 0
 fi
 
 # Header status covers every quota with data: the worst pace across providers
@@ -696,32 +787,25 @@ fi
 # color alone.
 HEADER_COLOR="$GREEN"
 HEADER_STATUS="On pace"
-if cp_has_data; then
-  HEADER_COLOR="$COLOR"
-  HEADER_STATUS="$STATUS"
-fi
-if [[ "$AGY_STATE" == "ok" ]]; then
-  update_header_from_rows "Antigravity" "$AGY_ROWS"
-fi
-if [[ "$CODEX_STATE" == "ok" ]]; then
-  update_header_from_rows "Codex" "$CODEX_ROWS"
-fi
+HEADER_ICON=""
+for provider in "${PROVIDERS[@]}"; do
+  provider_call "$provider" update_header
+done
 if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]] && \
-   [[ "$AGY_STATE" == "ok" || "$CODEX_STATE" == "ok" ]]; then
+   provider_any_data_except "copilot"; then
   HEADER_STATUS="All rations on pace"
 fi
 
-if ! cp_has_data && [[ "$AGY_STATE" != "ok" && "$CODEX_STATE" != "ok" ]]; then
-  # Reachable only when no provider has quota data.
+if ! provider_any_data; then
   HEADER_COLOR="$ORANGE"
   HEADER_STATUS="No quota data"
 fi
 
 # Menu bar percent: the busiest quota across every provider with data.
 PERCENT_TITLE="$({
-  if cp_has_data; then printf 'Copilot\t%s\n' "$ACTUAL_USED_PCT"; fi
-  if [[ "$CODEX_STATE" == "ok" ]]; then printf '%s\n' "$CODEX_ROWS"; fi
-  if [[ "$AGY_STATE" == "ok" ]]; then printf '%s\n' "$AGY_ROWS"; fi
+  for provider in "${PROVIDERS[@]}"; do
+    provider_call "$provider" has_data && provider_call "$provider" rows
+  done
 } | awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
   END { if (seen) printf "%.0f", max }')"
 
@@ -736,7 +820,7 @@ fi
 # rely on color alone; offline keeps its wifi-slash.
 TITLE_ICON="gauge"
 [[ "$HEADER_COLOR" == "$RED" ]] && TITLE_ICON="exclamationmark.triangle"
-[[ -n "$OFFLINE_ASOF" ]] && TITLE_ICON="wifi.slash"
+[[ -n "$HEADER_ICON" ]] && TITLE_ICON="$HEADER_ICON"
 TITLE_PARAMS+=" sfimage=${TITLE_ICON}"
 TITLE_TOOLTIP="Ration · ${HEADER_STATUS}"
 [[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="Ration · ${PERCENT_TITLE}% used · ${HEADER_STATUS}"
@@ -749,14 +833,11 @@ fi
 echo "---"
 echo "Ration | size=13"
 echo "● ${HEADER_STATUS} | color=${HEADER_COLOR} size=11"
-if [[ -n "$OFFLINE_ASOF" ]]; then
-  echo "Offline · cached data from ${OFFLINE_ASOF} | size=11 color=${SECONDARY_COLOR}"
-fi
-print_copilot_section
-print_codex_section
-print_antigravity_section
+for provider in "${PROVIDERS[@]}"; do
+  provider_call "$provider" render
+done
 echo "---"
 echo "Refresh | refresh=true sfimage=arrow.clockwise"
-if [[ "$CP_STATE" != "absent" ]]; then
-  echo "Open Copilot settings | href=https://github.com/settings/copilot sfimage=gearshape"
-fi
+for provider in "${PROVIDERS[@]}"; do
+  provider_call "$provider" settings
+done
