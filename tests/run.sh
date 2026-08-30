@@ -486,12 +486,122 @@ expect_contains "**Copilot**"
 expect_contains "GitHub sign-in expired"
 expect_contains "**Antigravity**"
 
+pin_menubar_source() {
+  mkdir -p "$FAKE_HOME/.config/ration"
+  printf '%s\n' "$1" > "$FAKE_HOME/.config/ration/menubar-source"
+}
+
+begin "menu bar source picker offers every set-up provider"
+make_gh_ok
+seed_codex_snapshot
+run_plugin
+expect_contains "Menu bar shows |"
+expect_contains "--Busiest quota | bash="
+expect_contains "param1=--set-menubar-source param2=copilot"
+expect_contains "param1=--set-menubar-source param2=codex"
+expect_contains "param1=--set-menubar-source param2=codex-5-hours"
+expect_contains "param1=--set-menubar-source param2=codex-weekly"
+# Antigravity isn't set up here, so pinning to it would be a dead choice.
+expect_not_contains "param2=antigravity"
+# The default sits on "auto", and clicks must not open a terminal window.
+expect_contains "param2=auto terminal=false refresh=true checked=true"
+
+begin "clicking a source persists it and shows that tool in the menu bar"
+make_gh_ok
+seed_codex_snapshot
+OUTPUT="$(env HOME="$FAKE_HOME" RATION_JQ="$JQ" "$PLUGIN" --set-menubar-source codex 2>/dev/null)"
+expect_check "click wrote no config file" test -s "$FAKE_HOME/.config/ration/menubar-source"
+expect_check "click printed a menu instead of exiting quietly" test -z "$OUTPUT"
+run_plugin
+# Copilot is the busiest at 25%, but Codex is pinned, so its 60% wins the title.
+# The mark replaces both the gauge and the name; the tooltip still spells it out.
+expect_contains "60% | size=12.5 templateImage="
+expect_not_contains "Codex 60% |"
+expect_not_contains "sfimage=gauge tooltip="
+expect_contains 'tooltip="Ration · Codex 60% used · 5 hours slightly over pace"'
+expect_contains "param2=codex terminal=false refresh=true checked=true templateImage="
+# The dropdown header still reports across every provider.
+expect_contains "● Codex 5 hours slightly over pace"
+expect_contains "**Copilot**"
+
+begin "selecting the Codex five-hour limit drives the menu bar"
+make_gh_ok
+seed_codex_snapshot
+OUTPUT="$(env HOME="$FAKE_HOME" RATION_JQ="$JQ" "$PLUGIN" --set-menubar-source codex-5-hours 2>/dev/null)"
+run_plugin
+expect_contains "60% | size=12.5 templateImage="
+expect_contains 'tooltip="Ration · Codex 60% used · 5 hours slightly over pace"'
+expect_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+expect_not_contains "param2=codex-weekly terminal=false refresh=true checked=true"
+
+begin "selecting the Codex weekly limit drives the menu bar"
+make_gh_ok
+seed_codex_snapshot
+OUTPUT="$(env HOME="$FAKE_HOME" RATION_JQ="$JQ" "$PLUGIN" --set-menubar-source codex-weekly 2>/dev/null)"
+run_plugin
+expect_contains "25% | size=12.5 templateImage="
+expect_contains 'tooltip="Ration · Codex 25% used · On pace"'
+expect_contains "param2=codex-weekly terminal=false refresh=true checked=true"
+expect_not_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+
+begin "Codex picker only offers windows in the current snapshot"
+GH_STUB=""
+seed_codex_weekly_only_snapshot
+run_plugin
+expect_contains "param2=codex-weekly terminal=false refresh=true"
+expect_not_contains "param2=codex-5-hours terminal=false refresh=true"
+
+begin "a missing pinned Codex window reports no quota data"
+GH_STUB=""
+seed_codex_weekly_only_snapshot
+pin_menubar_source codex-5-hours
+run_plugin
+expect_contains "? | size=12.5"
+expect_contains "tooltip=\"Ration · Codex No quota data\""
+expect_not_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+
+begin "pinned provider colors the menu bar by its own pace, not the worst"
+make_gh_ok 5 50
+seed_codex_weekly_only_snapshot
+pin_menubar_source codex
+run_plugin
+# Codex sits at 2% used, so the title stays uncolored despite Copilot burning.
+expect_contains "2% | size=12.5 templateImage="
+expect_contains "● Burning through the ration · may run out before reset"
+
+begin "a burning pinned provider keeps the warning glyph over its mark"
+GH_STUB=""
+make_agy "echo '$(agy_exhausted_json)'"
+pin_menubar_source antigravity
+run_plugin
+# Red must not rely on color alone, so the triangle wins the icon slot — and
+# the name comes back, since the mark is no longer there to identify the tool.
+expect_contains "Antigravity 100% | size=12.5 color="
+expect_contains "sfimage=exclamationmark.triangle"
+expect_not_contains "templateImage= "
+
+begin "pinned provider with no data still offers a way back"
+GH_STUB=""
+seed_codex_snapshot
+pin_menubar_source copilot
+run_plugin
+expect_contains "? | size=12.5"
+expect_contains "param2=copilot terminal=false refresh=true checked=true"
+expect_contains "param2=auto terminal=false refresh=true"
+
+begin "an unknown pinned source falls back to the busiest quota"
+make_gh_ok
+pin_menubar_source dropped-provider
+run_plugin
+expect_contains "25% | size=12.5"
+expect_contains "param2=auto terminal=false refresh=true checked=true"
+
 begin "all providers implement the shared lifecycle contract"
 expect_check "provider registry is missing" grep -qF \
   'PROVIDERS=("copilot" "codex" "antigravity")' "$PLUGIN"
 for provider in copilot codex antigravity; do
   contract_ok=true
-  for hook in fetch export postprocess has_data rows update_header render takeover settings present welcome; do
+  for hook in fetch export postprocess label logo has_data rows update_header render takeover settings present welcome; do
     grep -qE "^${provider}_${hook}\\(\\)" "$PLUGIN" || contract_ok=false
   done
   expect_check "${provider} provider contract is incomplete" test "$contract_ok" = true

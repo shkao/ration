@@ -30,6 +30,18 @@ ORANGE="#bc4c00,#f0883e"
 RED="#d1242f,#f85149"
 BLUE="#0969da,#58a6ff"
 
+# Each provider's mark as a base64 PNG, black on transparent so SwiftBar's
+# templateImage= tints it for the current appearance. 30px tall tagged 144 DPI:
+# macOS reads the pHYs chunk and lays them out at 15pt, so they sit at menu bar
+# scale while keeping retina pixels — untagged, they render at 30pt and tower
+# over the percentage. Copilot and OpenAI come from simple-icons, Antigravity
+# from a threshold of its own app icon, since no icon set carries that mark.
+# Inline because SwiftBar runs one file per plugin — a sidecar image folder
+# would be picked up as a second plugin.
+LOGO_COPILOT="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAACO0lEQVR4nMWUTWtTQRSGn9yEtKFF2yhNJQYXsS0VJO1KCyWiqAvdFgX1NyiibhTxF4hko6sus6guRNKSSmrtQsQfYNVWW2pBUXsJxZKkSZuM3GF6M/cjtSs9By7nvnPOzHs+ZuB/SaAF3sEoCXoR/OArbynvdcOz5KkiNK0wyZm/B8Z56QjTdZp468Ag91hvGWrpOncJ+uUc4Clj1JjiDUtU6Oc2R4AVHrJIhKOMcoEwz7iMcJ97CcECSQ0Zkaed1JAkCwjGvKRzCM650qhR02kC5xG88AavIOhyYZtsupBuBMveYNPTy7ik7a5wGXPHNLRTIrQ73EbkV88Z2ol42DBAA8FxB/ZKnjzjwFIIGgzokMG4dMyzz0buIFhjDcEtu6H7mZZ+403G/cxLaBHBBgWyTLCMoESaNCUES0yQpcCGbKfl+54+KzTGdzU/3TyRy5bWmWVYbj3MLHWF/uYxXcr+Rk+ALFcUA4tckD6ibPOFopbWAZKEKPKZOtjzlYUte3J1idFp253EHGtC6VbT1IOHqLJKm2rOKlWGfIJFs8/OhoRJcEjavSQIk/JzM/b4vvi+OIbfmFvZ+H6d8twqR17l0GQRJUdG2QEy5Ijaa4bynqLD+g3xQNZ8nquE2U3auCYHqsZ9/aqmmJH7mWRIqzo7w06RwZQ+hZ07oBfiNDe5KMlXeMcnfvFTdryHQU4QARpM8oi5VsQS3GCOsufpK/Ga6xx2Ovs/+iGOMchBWaYiJh/5wPau1fjH8gdqXu5Sxy7o3QAAAABJRU5ErkJggg=="
+LOGO_CODEX="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAADGUlEQVR4nJXVW2jXZRgH8M/mYUu98JQtSy9a6GC01BSiA53sRERkVMTQi8xcFwahjCQCwYuUVkHuqoUYYRkpSQecLoqcTmhDmzmrxcBZEi1DbTn+m9ve+L3+9j/4T7Lnvfg9z/s+3+d9jr+XYipT6wu/GNBjp4f9D6rRKRSsAyquDHqTc4LjVpiFueqcEvRq8IFGL7j28tBJTgi2KcvujLe+wIshjSb/O3iN4KAJWXmpYxHSrl6tNT4yLOg0s9jh1/0pWJrKlXZHYKd787SqHBfsV5rbmqgx2gwGlET3N8kI/lBn3CWXXK1XsCIXV7MgY3tMVUKbY3RvmRalEs/40uqsmacEHWPgjYJTbjZXcCTuNOlVlZ4udiBN1hF3pn7+bcTUhL1expDFsTBj4Hftj98KW43ocLtH/CQY9aE5+FawIFGoj8VRBC5T7y9Bm6vS+9Y6KzjvVV2CmmQzyenjReCTfpax2WsyetJzZnnHSFrvaPKQ4JYicLDbjZG/wS5Bi+rUwMLYvv2uS4QWwX1F4NaC8nxlxAVvmx6lSfYImil1FPfEzQymmRGLM1oAHrHdS2p1ew4DluvzoFtLfYxVsaJ9Vpmi24t5DTpGwxrN069JJU7HFD+RHCRO7EmHYbotLhjVVgD92tb4PTyWZfcL9ibM7FiSwxalqtX2CT4zL0qVPhGKwEuSOU8a/IzymMV2Ta5Blwc8psoxb9ikS40TRWFU4veEqREctcF5wTnrTIzH5bEt+61XrqXo5vcFaxNmgeBQLNUOo4Juj7pNu1HbzI6ql4IXGZa5eDbViDPpzNyhIx2DNktSF+frKQBX+02wYSyCBLAs5UuttE9tnOvE8JuGBA1R+l6w06Dg09ycL48/uYv9k6NxVusTDGowJZo9m/Z1g/E5tVLfxKTNz4Pe7buo+nlaMu4SnLYxK2dpZmz3QTvUedI6rRH4g4fy/GgVvFxUtEiTbYnR5dYreW06IU5ab3T/MlTheY3e0+CkoMfK+FbM8HQMoT+b//+gOQ6m9yeVT9aPFl4ZNKESy+zyqyF9mj2b94pk6R/pgUWJre5IQQAAAABJRU5ErkJggg=="
+LOGO_ANTIGRAVITY="iVBORw0KGgoAAAANSUhEUgAAACEAAAAeCAQAAAAIwb+cAAAACXBIWXMAABYlAAAWJQFJUiTwAAAB3klEQVR4nJWVz2sTQRiGn8R0TasghVrFENBbsCGth5raYNJjBVEx9aZ48iAiYo+lf4D3Qg+G5tDeehH0UC8ePKjYH5dSkdKAJVQRi0olFpuYrOw6nU53d3Y331wy3/vOM983TGZBH3085QsmP1jgJkdoO66yhinHTyYw2gMMsqkArLHHg3YA3bx0AKxR5UJ4xCNaHgiTmbAn0sOKJ8DkO8PhEGPUNQiTqTCADua1AJM1TgcjUnz2Qexxzbkg6kLkOOOzgcGVIESUQkCV+aBWklR82rDGb0b8qxggGVBFFzl/RD7EP+EycT3iGIOBAOjnnB5xnozD3uIvTUeul4vqNHZIvES3MtvkGe+pYZDhBgPKtnlmMb0KPMpz5eRfkFa0BFM0pPaRhHePab5K02vXBYtTkmqdojfiobRskfXQE7yTjhIRt6FLeWYmvPdglB3hqHDWLRek/JaTGkSMsvC0uO8UI7LTGtfRRx+fhO8NJw5L/WwJqUyHDwLGxaP4h9tq2mBOANZJBT7NC8K7zKmD9F127eQudwiOIVnxk/3neFh8M5pMOm6rLm6Jo6/937LAB3vaYJrjoQDW4T/ml73qG/dg0f65zTidIQFWRCmyYa/cgSVMVnUX1jeyvKJO9R88xQHabYBrtgAAAABJRU5ErkJggg=="
+
 # Deliberately outside the plugin folder: SwiftBar treats every executable in
 # its plugin directory as its own plugin and runs it automatically, which
 # previously caused this login script to auto-execute `gh auth login --web`
@@ -43,6 +55,22 @@ CACHE_DIR="${HOME}/Library/Caches/ration"
 CACHE_FILE="${CACHE_DIR}/quota.json"
 CODEX_HOME="${HOME}/.codex"
 CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
+
+# Which quota drives the menu bar number: "auto" (busiest across providers), a
+# provider id, or a Codex window id, so a pinned tool stays readable without
+# opening the dropdown. Kept outside the cache dir — uninstall wipes caches,
+# not settings.
+CONFIG_DIR="${HOME}/.config/ration"
+MENUBAR_SOURCE_FILE="${CONFIG_DIR}/menubar-source"
+
+# The picker menu items re-run this same file with the flag below, which keeps
+# the setting self-contained instead of needing a second helper script.
+SELF="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+if [[ "${1:-}" == "--set-menubar-source" ]]; then
+  mkdir -p "$CONFIG_DIR" 2>/dev/null
+  printf '%s\n' "${2:-auto}" > "$MENUBAR_SOURCE_FILE" 2>/dev/null
+  exit 0
+fi
 
 # Provider contract: <id>_{fetch,export,postprocess,has_data,rows,
 # update_header,render,takeover,settings,present,welcome}. Main orchestration
@@ -76,6 +104,20 @@ provider_any_present() {
     provider_call "$provider" present && return 0
   done
   return 1
+}
+
+# An unreadable or stale file (a provider that no longer exists) falls back to
+# "auto" rather than pinning the menu bar to a source that can never report.
+read_menubar_source() {
+  local value="auto" provider
+  [[ -s "$MENUBAR_SOURCE_FILE" ]] && value="$(sed -n '1p' "$MENUBAR_SOURCE_FILE" 2>/dev/null)"
+  case "$value" in
+    auto|codex-5-hours|codex-weekly) echo "$value"; return ;;
+  esac
+  for provider in "${PROVIDERS[@]}"; do
+    [[ "$provider" == "$value" ]] && { echo "$value"; return; }
+  done
+  echo "auto"
 }
 
 # macOS has no `timeout`; without one a stalled network call would hang the
@@ -228,6 +270,40 @@ update_header_from_rows() {
   done <<< "$rows"
 }
 
+# Roll pace up into the HEADER_* globals. $1 limits the roll-up to a single
+# provider (empty = all of them), and $2 optionally limits Codex to one window.
+# That is how a pinned menu bar reports only the quota it names.
+compute_header() {
+  local only="$1" codex_limit="${2:-}" provider
+  HEADER_COLOR="$GREEN"
+  HEADER_STATUS="On pace"
+  HEADER_ICON=""
+  for provider in "${PROVIDERS[@]}"; do
+    [[ -n "$only" && "$provider" != "$only" ]] && continue
+    if [[ "$provider" == "codex" && -n "$codex_limit" ]]; then
+      provider_call "$provider" update_header "$codex_limit"
+    else
+      provider_call "$provider" update_header
+    fi
+  done
+  if [[ -n "$only" ]]; then
+    if [[ "$only" == "codex" && -n "$codex_limit" ]]; then
+      provider_call "$only" rows "$codex_limit" >/dev/null && return 0
+    elif provider_call "$only" has_data; then
+      return 0
+    fi
+  else
+    # Plural wording only earns its place when more than Copilot reports.
+    if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]] && \
+       provider_any_data_except "copilot"; then
+      HEADER_STATUS="All rations on pace"
+    fi
+    provider_any_data && return 0
+  fi
+  HEADER_COLOR="$ORANGE"
+  HEADER_STATUS="No quota data"
+}
+
 # Antigravity quota via the antigravity-usage CLI (npm). All Gemini models
 # share one weekly quota and all Claude/GPT models another, so one row per
 # group. Fetched before the header renders so the global status can include
@@ -294,10 +370,12 @@ antigravity_export() {
 }
 
 antigravity_postprocess() { :; }
+antigravity_label() { echo "Antigravity"; }
+antigravity_logo() { echo "$LOGO_ANTIGRAVITY"; }
 antigravity_has_data() { [[ "$AGY_STATE" == "ok" ]]; }
 antigravity_rows() { antigravity_has_data && printf '%s\n' "$AGY_ROWS"; }
 antigravity_update_header() {
-  antigravity_has_data && update_header_from_rows "Antigravity" "$AGY_ROWS"
+  antigravity_has_data && update_header_from_rows "$(antigravity_label)" "$AGY_ROWS"
 }
 
 antigravity_render() {
@@ -434,10 +512,23 @@ codex_export() {
 }
 
 codex_postprocess() { :; }
+codex_label() { echo "Codex"; }
+codex_logo() { echo "$LOGO_CODEX"; }
 codex_has_data() { [[ "$CODEX_STATE" == "ok" ]]; }
-codex_rows() { codex_has_data && printf '%s\n' "$CODEX_ROWS"; }
+codex_rows() {
+  codex_has_data || return 1
+  if [[ -z "${1:-}" ]]; then
+    printf '%s\n' "$CODEX_ROWS"
+  else
+    awk -F '\t' -v wanted="$1" '$1 == wanted { print; found = 1 } END { exit !found }' <<< "$CODEX_ROWS"
+  fi
+}
 codex_update_header() {
-  codex_has_data && update_header_from_rows "Codex" "$CODEX_ROWS"
+  local selector="${1:-}" rows="$CODEX_ROWS"
+  if [[ -n "$selector" ]]; then
+    rows="$(codex_rows "$selector")"
+  fi
+  [[ -n "$rows" ]] && update_header_from_rows "$(codex_label)" "$rows"
 }
 
 codex_render() {
@@ -481,6 +572,37 @@ print_takeover_menu() {
 
 signin_item() {
   echo "Sign in with GitHub… | bash=${LOGIN_SCRIPT} color=${BLUE} size=12 sfimage=person.crop.circle.badge.plus"
+}
+
+# `terminal=false` keeps the click silent, `refresh=true` re-renders the menu
+# bar with the new source immediately. SELF is quoted for plugin folders with
+# spaces in their path.
+menubar_source_params() {
+  local value="$1"
+  local params="bash=\"${SELF}\" param1=--set-menubar-source param2=${value} terminal=false refresh=true"
+  [[ "$value" == "$MENUBAR_SOURCE" ]] && params+=" checked=true"
+  echo "$params"
+}
+
+# Only providers that are set up are offered, plus whichever one is pinned, so
+# the current choice always shows its checkmark even after a provider drops out.
+# Items keep their names here: a settings menu of three bare logos would make
+# you decode the marks before you could choose between them.
+print_menubar_source_menu() {
+  local provider label
+  echo "Menu bar shows | sfimage=menubar.rectangle"
+  echo "--Busiest quota | $(menubar_source_params auto) sfimage=gauge"
+  for provider in "${PROVIDERS[@]}"; do
+    [[ "$provider" == "$MENUBAR_PROVIDER" ]] || provider_call "$provider" present || continue
+    label="$(provider_call "$provider" label)"
+    if [[ "$provider" == "codex" ]]; then
+      echo "--${label} | $(menubar_source_params codex) templateImage=$(provider_call "$provider" logo)"
+      provider_call "$provider" rows "5 hours" >/dev/null && echo "---5 hours | $(menubar_source_params codex-5-hours)"
+      provider_call "$provider" rows "Weekly" >/dev/null && echo "---Weekly | $(menubar_source_params codex-weekly)"
+    else
+      echo "--${label} | $(menubar_source_params "$provider") templateImage=$(provider_call "$provider" logo)"
+    fi
+  done
 }
 
 # jq parses every provider's output, so it stays a hard requirement. gh is
@@ -638,6 +760,9 @@ if ! float_gt "$PERCENT_REMAINING" 0; then
 fi
 }
 
+copilot_label() { echo "Copilot"; }
+copilot_logo() { echo "$LOGO_COPILOT"; }
+
 copilot_has_data() { [[ "$CP_STATE" == "ok" || "$CP_STATE" == "offline" ]]; }
 
 copilot_rows() {
@@ -786,53 +911,82 @@ if ! provider_any_present; then
   exit 0
 fi
 
-# Header status covers every quota with data: the worst pace across providers
-# wins, and the offending quota is named in text so the alert doesn't rely on
-# color alone.
-HEADER_COLOR="$GREEN"
-HEADER_STATUS="On pace"
-HEADER_ICON=""
-for provider in "${PROVIDERS[@]}"; do
-  provider_call "$provider" update_header
-done
-if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]] && \
-   provider_any_data_except "copilot"; then
-  HEADER_STATUS="All rations on pace"
-fi
+MENUBAR_SOURCE="$(read_menubar_source)"
+MENUBAR_PROVIDER=""
+MENUBAR_CODEX_LIMIT=""
+case "$MENUBAR_SOURCE" in
+  codex-5-hours)
+    MENUBAR_PROVIDER="codex"
+    MENUBAR_CODEX_LIMIT="5 hours"
+    ;;
+  codex-weekly)
+    MENUBAR_PROVIDER="codex"
+    MENUBAR_CODEX_LIMIT="Weekly"
+    ;;
+  auto) ;;
+  *) MENUBAR_PROVIDER="$MENUBAR_SOURCE" ;;
+esac
 
-if ! provider_any_data; then
-  HEADER_COLOR="$ORANGE"
-  HEADER_STATUS="No quota data"
-fi
+# A pinned source owns the menu bar alone: naming one tool up there while
+# coloring it by another's pace would be a lie. The dropdown header, computed
+# second, still speaks for every provider — worst pace wins and names its
+# quota in text so the alert doesn't rely on color alone.
+compute_header "$MENUBAR_PROVIDER" "$MENUBAR_CODEX_LIMIT"
+TITLE_COLOR="$HEADER_COLOR"
+TITLE_STATUS="$HEADER_STATUS"
+TITLE_OFFLINE_ICON="$HEADER_ICON"
+[[ -n "$MENUBAR_PROVIDER" ]] && compute_header ""
 
-# Menu bar percent: the busiest quota across every provider with data.
+# Menu bar percent: the selected Codex window when one is pinned, otherwise
+# the busiest quota of the pinned provider or of every provider in "auto".
 PERCENT_TITLE="$({
   for provider in "${PROVIDERS[@]}"; do
-    provider_call "$provider" has_data && provider_call "$provider" rows
+    [[ -n "$MENUBAR_PROVIDER" && "$provider" != "$MENUBAR_PROVIDER" ]] && continue
+    provider_call "$provider" has_data && provider_call "$provider" rows "$MENUBAR_CODEX_LIMIT"
   done
 } | awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
   END { if (seen) printf "%.0f", max }')"
 
+# A pinned percentage needs to say which tool it came from. The mark does that
+# in the menu bar; the name still carries the tooltip and the text fallback.
+TITLE_NAME=""
+if [[ -n "$MENUBAR_PROVIDER" ]]; then
+  TITLE_NAME="$(provider_call "$MENUBAR_PROVIDER" label) "
+  # Row-level statuses lead with the provider name, which the title already
+  # carries: "Codex · Codex 5 hours over pace" reads as a stutter.
+  TITLE_STATUS="${TITLE_STATUS#"$TITLE_NAME"}"
+fi
+
 # Smaller than the native menu bar font size (14) — per user preference.
 TITLE_PARAMS="size=12.5"
 # Surface off-pace states in the menu bar itself via the alert color.
-if [[ "$HEADER_COLOR" == "$RED" || "$HEADER_COLOR" == "$ORANGE" ]]; then
-  TITLE_PARAMS+=" color=${HEADER_COLOR}"
+if [[ "$TITLE_COLOR" == "$RED" || "$TITLE_COLOR" == "$ORANGE" ]]; then
+  TITLE_PARAMS+=" color=${TITLE_COLOR}"
 fi
 # Gauge glyph gives the bare percentage an identity next to other numeric
 # menu bar items. Red swaps in a warning glyph so the worst state doesn't
 # rely on color alone; offline keeps its wifi-slash.
 TITLE_ICON="gauge"
-[[ "$HEADER_COLOR" == "$RED" ]] && TITLE_ICON="exclamationmark.triangle"
-[[ -n "$HEADER_ICON" ]] && TITLE_ICON="$HEADER_ICON"
-TITLE_PARAMS+=" sfimage=${TITLE_ICON}"
-TITLE_TOOLTIP="Ration · ${HEADER_STATUS}"
-[[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="Ration · ${PERCENT_TITLE}% used · ${HEADER_STATUS}"
+[[ "$TITLE_COLOR" == "$RED" ]] && TITLE_ICON="exclamationmark.triangle"
+[[ -n "$TITLE_OFFLINE_ICON" ]] && TITLE_ICON="$TITLE_OFFLINE_ICON"
+# A pinned provider swaps the generic gauge for its own mark, which says which
+# tool the number belongs to more compactly than its name — so the name drops
+# out of the title. The warning and offline glyphs still win that slot: they
+# carry states the mark can't, and the name comes back to keep them readable.
+TITLE_LABEL="$TITLE_NAME"
+if [[ -n "$MENUBAR_PROVIDER" && "$TITLE_ICON" == "gauge" ]]; then
+  TITLE_PARAMS+=" templateImage=$(provider_call "$MENUBAR_PROVIDER" logo)"
+  TITLE_LABEL=""
+else
+  TITLE_PARAMS+=" sfimage=${TITLE_ICON}"
+fi
+TITLE_TOOLTIP="Ration · ${TITLE_NAME}${TITLE_STATUS}"
+[[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="Ration · ${TITLE_NAME}${PERCENT_TITLE}% used · ${TITLE_STATUS}"
 TITLE_PARAMS+=" tooltip=\"${TITLE_TOOLTIP}\""
 if [[ -n "$PERCENT_TITLE" ]]; then
-  echo "${PERCENT_TITLE}% | ${TITLE_PARAMS}"
+  echo "${TITLE_LABEL}${PERCENT_TITLE}% | ${TITLE_PARAMS}"
 else
-  echo "? | ${TITLE_PARAMS}"
+  echo "${TITLE_LABEL}? | ${TITLE_PARAMS}"
 fi
 echo "---"
 echo "Ration | size=13"
@@ -842,6 +996,7 @@ for provider in "${PROVIDERS[@]}"; do
 done
 echo "---"
 echo "Refresh | refresh=true sfimage=arrow.clockwise"
+print_menubar_source_menu
 for provider in "${PROVIDERS[@]}"; do
   provider_call "$provider" settings
 done

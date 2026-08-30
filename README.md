@@ -19,9 +19,11 @@ Your employer hands you a fixed ration of AI requests: GitHub Copilot premium re
 
 ## What the menu bar tells you
 
-The bar shows a gauge icon and one number: how much of your busiest quota you've used. Open it for one bar per quota, each with its reset date.
+By default, the bar shows a gauge icon and one number: how much of your busiest quota you've used. Pin a provider, or a Codex window, to show that selection instead. Open it for one bar per quota, each with its reset date.
 
 Every bar has a tick (`│`). The tick is your fair share for right now, where usage would sit if you spread it evenly to reset day. Fill behind the tick means you're on pace. Fill past it means you're burning faster than the clock, and the menu bar number warms from green to orange to red. At the worst state the gauge swaps to a warning triangle, so trouble reads without relying on color. Hit 100% and Ration stops pacing and counts down instead: see you on reset day.
+
+Watching one tool in particular? **Menu bar shows** in the dropdown pins the bar to a single provider. The gauge is then replaced by that product's mark, so the number reads as its own without spelling out a name, and the color follows that provider's pace alone. Codex opens a second-level choice for its 5-hour or weekly limit. The warning triangle still takes the icon slot at the worst state, where it brings the name back with it. The choice is saved in `~/.config/ration/menubar-source`; pick **Busiest quota** to go back to the default.
 
 ## Install
 
@@ -97,7 +99,7 @@ These commands use the default plugin folder. If you installed into a custom `SW
 
 ```bash
 rm ~/.swiftbar-plugins/ration.5m.sh
-rm -rf ~/.ration-helpers ~/Library/Caches/ration
+rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
 ```
 
 <details>
