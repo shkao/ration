@@ -1,5 +1,5 @@
 #!/bin/bash
-# Integration tests for ration.5m.sh.
+# Integration tests for ration.1m.sh.
 #
 # Each test runs the real plugin end to end against stub `gh` /
 # `antigravity-usage` binaries and an isolated $HOME, then asserts on the
@@ -8,7 +8,7 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLUGIN="$ROOT/ration.5m.sh"
+PLUGIN="$ROOT/ration.1m.sh"
 JQ="$(command -v jq)"
 
 if [[ -z "$JQ" ]]; then
@@ -31,8 +31,7 @@ OUTPUT=""
 # Fresh isolated HOME per test so caches and helper scripts never leak
 # between cases (or from the developer's real account).
 new_home() {
-  FAKE_HOME="$TMP/home-$RANDOM"
-  mkdir -p "$FAKE_HOME"
+  FAKE_HOME="$(mktemp -d "$TMP/home.XXXXXX")"
 }
 
 # Write a stub `gh`. $1 is the body handling `gh api ...`; `gh auth token`
@@ -418,6 +417,39 @@ expect_contains "Weekly:     [████░░░░│░░░░░░░] 
 expect_contains "ChatGPT Plus · local Codex snapshot"
 expect_contains "● Codex 5 hours slightly over pace"
 
+begin "Codex uses the newest snapshot in an old resumed session"
+GH_STUB=""
+seed_codex_snapshot
+mkdir -p "$FAKE_HOME/.codex/sessions/2025/01/01"
+codex_jsonl | sed 's/2026-08-01T10:00:00Z/2026-08-02T10:00:00Z/; s/60.0/80.0/' > "$FAKE_HOME/.codex/sessions/2025/01/01/rollout-old.jsonl"
+run_plugin
+expect_contains "80% used"
+expect_contains "snapshot from"
+
+begin "Codex compares snapshot times even when another session was touched later"
+GH_STUB=""
+seed_codex_snapshot
+mkdir -p "$FAKE_HOME/.codex/archived_sessions"
+codex_jsonl | sed 's/2026-08-01T10:00:00Z/2026-08-02T10:00:00Z/; s/60.0/85.0/' > "$FAKE_HOME/.codex/archived_sessions/rollout-old.jsonl"
+touch -t 202608031200 "$FAKE_HOME/.codex/archived_sessions/rollout-old.jsonl"
+run_plugin
+expect_contains "85% used"
+
+begin "Antigravity bypasses the CLI cache"
+make_agy "[[ \"\$*\" == \"--json --refresh\" ]] || exit 1
+cat <<'JSON'
+$(agy_json)
+JSON"
+run_plugin
+expect_contains "60% used"
+
+begin "fresh remote quotas show fetch times"
+make_gh_ok
+make_agy_json
+run_plugin
+expect_contains "Copilot fetched at"
+expect_contains "Antigravity fetched at"
+
 begin "codex alone works without other providers"
 GH_STUB=""
 seed_codex_snapshot
@@ -612,14 +644,15 @@ expect_check "welcome menu bypasses shared takeover chrome" sh -c \
 begin "installer reproduces an isolated per-user setup"
 PLUGIN_DIR="$FAKE_HOME/custom swiftbar plugins"
 mkdir -p "$PLUGIN_DIR" "$FAKE_HOME/.quotapace-helpers"
-touch "$PLUGIN_DIR/quotapace.5m.sh" "$FAKE_HOME/.quotapace-helpers/legacy"
+touch "$PLUGIN_DIR/ration.5m.sh" "$PLUGIN_DIR/quotapace.5m.sh" "$FAKE_HOME/.quotapace-helpers/legacy"
 OUTPUT="$(cd /private/tmp && HOME="$FAKE_HOME" SWIFTBAR_PLUGIN_DIR="$PLUGIN_DIR" "$ROOT/install.sh")"
-expect_contains "Plugin: $PLUGIN_DIR/ration.5m.sh"
-expect_check "installed plugin is executable" test -x "$PLUGIN_DIR/ration.5m.sh"
+expect_contains "Plugin: $PLUGIN_DIR/ration.1m.sh"
+expect_check "installed plugin is executable" test -x "$PLUGIN_DIR/ration.1m.sh"
 expect_check "installed helper is executable" test -x "$FAKE_HOME/.ration-helpers/ration-login.sh"
-expect_check "installed plugin matches the checkout" cmp -s "$PLUGIN" "$PLUGIN_DIR/ration.5m.sh"
+expect_check "installed plugin matches the checkout" cmp -s "$PLUGIN" "$PLUGIN_DIR/ration.1m.sh"
 expect_check "installed helper matches the checkout" cmp -s \
   "$ROOT/helpers/ration-login.sh" "$FAKE_HOME/.ration-helpers/ration-login.sh"
+expect_check "five-minute plugin was removed" test ! -e "$PLUGIN_DIR/ration.5m.sh"
 expect_check "legacy plugin was removed" test ! -e "$PLUGIN_DIR/quotapace.5m.sh"
 expect_check "legacy helper directory was removed" test ! -e "$FAKE_HOME/.quotapace-helpers"
 

@@ -74,9 +74,9 @@ That's the whole app. The tick is today's fair share. Fill past it is bread eate
 
 ## How it works
 
-Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own Copilot clients use, and refreshes every 5 minutes (the `5m` in `ration.5m.sh`, per SwiftBar's naming). It also reads the newest Codex rate-limit snapshot on disk. These sources report snapshots, so Ration works out pace locally from each limit's reset time and window length.
+Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own Copilot clients use, and refreshes every minute (the `1m` in `ration.1m.sh`, per SwiftBar's naming). It also reads the newest Codex rate-limit snapshot on disk, including resumed and archived sessions. Each provider shows when its data was fetched or recorded; cached responses keep their original timestamp. Re-run `./install.sh` to replace the old five-minute plugin with the one-minute version. These sources report snapshots, so Ration works out pace locally from each limit's reset time and window length.
 
-It caches the last good provider responses at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration asks you to sign in when a previously detected Copilot account has no local token or GitHub rejects that token.
+It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cache. It caches the last good provider responses at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration asks you to sign in when a previously detected Copilot account has no local token or GitHub rejects that token.
 
 ## Caveats
 
@@ -95,10 +95,10 @@ The suite runs the real plugin end to end against stub Copilot and Antigravity c
 
 ## Uninstall
 
-These commands use the default plugin folder. If you installed into a custom `SWIFTBAR_PLUGIN_DIR`, remove `ration.5m.sh` there instead.
+These commands use the default plugin folder. If you installed into a custom `SWIFTBAR_PLUGIN_DIR`, remove `ration.1m.sh` there instead.
 
 ```bash
-rm ~/.swiftbar-plugins/ration.5m.sh
+rm ~/.swiftbar-plugins/ration.1m.sh
 rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
 ```
 
@@ -106,14 +106,14 @@ rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
 <summary>Project layout</summary>
 
 ```
-ration.5m.sh              the plugin, everything in one file by design
+ration.1m.sh              the plugin, everything in one file by design
 helpers/ration-login.sh   "Sign in with GitHub…" recovery action
 install.sh                copies both files into place
 tests/run.sh              integration tests (provider fixtures, isolated $HOME)
 .github/workflows/ci.yml  shellcheck on Linux, tests on macOS
 ```
 
-SwiftBar runs a single file per plugin, so `ration.5m.sh` stays one self-contained script: no sourced libraries, no build step. It also runs every executable in its plugin folder as a plugin, so the login helper lives in `~/.ration-helpers/` instead. Left in the plugin folder, it would fire `gh auth login --web` on every launch.
+SwiftBar runs a single file per plugin, so `ration.1m.sh` stays one self-contained script: no sourced libraries, no build step. It also runs every executable in its plugin folder as a plugin, so the login helper lives in `~/.ration-helpers/` instead. Left in the plugin folder, it would fire `gh auth login --web` on every launch.
 
 </details>
 

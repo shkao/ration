@@ -312,6 +312,7 @@ AGY_STATE="absent" # absent (CLI not installed) | ok | error
 AGY_ROWS=""        # one group per line: label, used%, reset epoch, elapsed%
 AGY_EMAIL=""
 AGY_ASOF=""
+AGY_FETCHED=""
 # One jq pass over a snapshot: email on the first line, then one TSV row per
 # quota group. Empty output means the payload isn't a usable snapshot.
 # Weekly rolling window: elapsed = share of the 7 days already gone.
@@ -343,10 +344,11 @@ antigravity_fetch() {
   [[ -z "$agy_bin" ]] && return 0
 
   local agy_cache="${CACHE_DIR}/antigravity.json" json parsed=""
-  json="$(run_with_timeout "$agy_bin" --json 2>/dev/null)"
+  json="$(run_with_timeout "$agy_bin" --json --refresh 2>/dev/null)"
   [[ -n "$json" ]] && parsed="$(parse_antigravity <<< "$json")"
   if [[ -n "$parsed" ]]; then
     write_cache "$agy_cache" "$json"
+    AGY_FETCHED="$(date '+%-d %b %H:%M')"
   elif [[ -s "$agy_cache" ]]; then
     parsed="$(parse_antigravity < "$agy_cache")"
     if [[ -z "$parsed" ]]; then
@@ -366,7 +368,7 @@ antigravity_fetch() {
 }
 
 antigravity_export() {
-  declare -p AGY_STATE AGY_ROWS AGY_EMAIL AGY_ASOF
+  declare -p AGY_STATE AGY_ROWS AGY_EMAIL AGY_ASOF AGY_FETCHED
 }
 
 antigravity_postprocess() { :; }
@@ -389,6 +391,7 @@ antigravity_render() {
 
   print_quota_rows "$AGY_ROWS"
 
+  [[ -n "$AGY_FETCHED" ]] && echo "Antigravity fetched at ${AGY_FETCHED} | size=11 color=${SECONDARY_COLOR}"
   local note="$AGY_EMAIL"
   [[ -n "$AGY_ASOF" ]] && note="${note:+${note} · }cached from ${AGY_ASOF}"
   [[ -n "$note" ]] && echo "${note} | size=11 color=${SECONDARY_COLOR}"
@@ -407,48 +410,19 @@ antigravity_welcome() {
 CODEX_STATE="absent" # absent | ok
 CODEX_ROWS=""        # one window per line: label, used%, reset epoch, elapsed%
 CODEX_PLAN=""
+CODEX_ASOF=""
 codex_candidate_files() {
-  local -a session_days=("$CODEX_HOME"/sessions/*/*/*)
-  local -a files
-  local day file
-  local day_count=0 file_count=0
-  local i j
-
-  # Session paths contain sortable YYYY/MM/DD and rollout timestamps. Inspect
-  # at most 20 sessions from each of the newest three active days.
-  for ((i = ${#session_days[@]} - 1; i >= 0 && day_count < 3; i--)); do
-    day="${session_days[$i]}"
-    [[ -d "$day" ]] || continue
-    day_count=$((day_count + 1))
-    files=("$day"/*.jsonl)
-    file_count=0
-    for ((j = ${#files[@]} - 1; j >= 0 && file_count < 20; j--)); do
-      file="${files[$j]}"
-      [[ -f "$file" ]] || continue
-      printf '%s\n' "$file"
-      file_count=$((file_count + 1))
-    done
-  done
-
-  # Older Codex versions move sessions into one archive directory. The
-  # timestamped filenames keep the newest 20 selectable without reading them.
-  files=("$CODEX_HOME"/archived_sessions/*.jsonl)
-  file_count=0
-  for ((j = ${#files[@]} - 1; j >= 0 && file_count < 20; j--)); do
-    file="${files[$j]}"
-    [[ -f "$file" ]] || continue
-    printf '%s\n' "$file"
-    file_count=$((file_count + 1))
-  done
+  # A resumed session can live under any creation date, including the archive.
+  # Sort metadata first so sessions older than the best snapshot need no reads.
+  find "$CODEX_HOME/sessions" "$CODEX_HOME/archived_sessions" -type f -name '*.jsonl' \
+    -exec stat -f $'%m\t%z\t%N' {} + 2>/dev/null | sort -t $'\t' -k1,1nr
 }
 
 codex_fetch() {
-  local candidate_files signature cached_signature file parsed=""
+  local candidate_files signature cached_signature file modified _size snapshot parsed="" best=0
   candidate_files="$(codex_candidate_files)"
   [[ -z "$candidate_files" ]] && return 0
-  signature="$(while IFS= read -r file; do
-    stat -f '%m:%z:%N' "$file" 2>/dev/null
-  done <<< "$candidate_files" | cksum | awk '{ print $1 ":" $2 }')"
+  signature="v2:$(printf '%s\n' "$candidate_files" | cksum | awk '{ print $1 ":" $2 }')"
 
   if [[ -s "$CODEX_CACHE_FILE" ]]; then
     cached_signature="$(sed -n '1p' "$CODEX_CACHE_FILE")"
@@ -458,24 +432,30 @@ codex_fetch() {
   fi
 
   if [[ "$cached_signature" != "$signature" ]]; then
-    while IFS= read -r file; do
-      parsed="$(tail -r "$file" 2>/dev/null | "$JQ_BIN" -r '
+    while IFS=$'\t' read -r modified _size file; do
+      [[ "$modified" -lt "$best" ]] && break
+      # shellcheck disable=SC2016
+      snapshot="$(tail -r "$file" 2>/dev/null | "$JQ_BIN" -r --argjson modified "$modified" '
         select(.type == "event_msg" and .payload.type == "token_count")
+        | ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601?) // $modified) as $recorded
         | .payload.rate_limits
         | select(.limit_id == "codex" and .primary.used_percent != null)
-        | [(.plan_type // "__RATION_NO_PLAN__"),
+        | [$recorded, (.plan_type // "__RATION_NO_PLAN__"),
            .primary.used_percent, .primary.window_minutes, .primary.resets_at,
            (.secondary.used_percent // ""), (.secondary.window_minutes // ""),
            (.secondary.resets_at // "")]
         | @tsv' 2>/dev/null | head -1)"
-      [[ -n "$parsed" ]] && break
+      if [[ -n "$snapshot" && "${snapshot%%$'\t'*}" -ge "$best" ]]; then
+        parsed="$snapshot"
+        best="${snapshot%%$'\t'*}"
+      fi
     done <<< "$candidate_files"
     write_cache "$CODEX_CACHE_FILE" "${signature}"$'\n'"${parsed}"
   fi
   [[ -z "$parsed" ]] && return 0
 
   local primary_used primary_window primary_reset secondary_used secondary_window secondary_reset
-  IFS=$'\t' read -r CODEX_PLAN primary_used primary_window primary_reset \
+  IFS=$'\t' read -r CODEX_ASOF CODEX_PLAN primary_used primary_window primary_reset \
     secondary_used secondary_window secondary_reset <<< "$parsed"
   [[ "$CODEX_PLAN" == "__RATION_NO_PLAN__" ]] && CODEX_PLAN=""
   local now elapsed label slot
@@ -508,7 +488,7 @@ codex_fetch() {
 }
 
 codex_export() {
-  declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN
+  declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN CODEX_ASOF
 }
 
 codex_postprocess() { :; }
@@ -541,7 +521,8 @@ codex_render() {
     if (plan == "") print "ChatGPT"
     else print "ChatGPT " toupper(substr(plan, 1, 1)) substr(plan, 2)
   }')"
-  echo "${plan_display} · local Codex snapshot | size=11 color=${SECONDARY_COLOR}"
+  echo "${plan_display} · local Codex snapshot from $(date -r "$CODEX_ASOF" '+%-d %b %H:%M') | size=11 color=${SECONDARY_COLOR}"
+  echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
 }
 
 codex_takeover() { return 1; }
@@ -636,6 +617,7 @@ print_signin_menu() {
 CP_STATE="absent" # absent | ok | offline | signedout | expired | nocopilot | unreachable | badresponse
 CP_ERR=""
 OFFLINE_ASOF=""
+CP_FETCHED=""
 RESPONSE=""
 # Single home for state copy rendered both as a section line and a takeover menu.
 CP_MSG_UNREACHABLE="GitHub is unreachable and no cached data yet"
@@ -676,11 +658,12 @@ copilot_fetch() {
     fi
   else
     CP_STATE="ok"
+    CP_FETCHED="$(date '+%-d %b %H:%M')"
   fi
 }
 
 copilot_export() {
-  declare -p CP_STATE CP_ERR OFFLINE_ASOF RESPONSE
+  declare -p CP_STATE CP_ERR OFFLINE_ASOF RESPONSE CP_FETCHED
 }
 
 # Parse the (fresh or cached) response and derive pace. Sets CP_STATE to
@@ -792,6 +775,7 @@ copilot_render() {
       print_limit_line "Monthly" "$ACTUAL_USED_PCT" "$COLOR" "$ELAPSED_PCT"
       echo "Resets ${RESET_DISPLAY} · $(printf '%.0f' "$REMAINING") of ${ENTITLEMENT} left | size=11 color=${SECONDARY_COLOR}"
       echo "${LOGIN} · ${PLAN} (${ORG}) | size=11 color=${SECONDARY_COLOR}"
+      [[ -n "$CP_FETCHED" ]] && echo "Copilot fetched at ${CP_FETCHED} | size=11 color=${SECONDARY_COLOR}"
       ;;
     signedout | expired)
       local headline="Not signed in to GitHub"
