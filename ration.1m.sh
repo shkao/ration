@@ -58,8 +58,8 @@ CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
 
 # Which quota drives the menu bar number: "auto" (busiest across providers), a
 # provider id, or a Codex window id, so a pinned tool stays readable without
-# opening the dropdown. Kept outside the cache dir — uninstall wipes caches,
-# not settings.
+# opening the dropdown. Kept outside the cache dir, so clearing caches doesn't
+# reset it; the README's uninstall step removes it explicitly.
 CONFIG_DIR="${HOME}/.config/ration"
 MENUBAR_SOURCE_FILE="${CONFIG_DIR}/menubar-source"
 
@@ -72,7 +72,7 @@ if [[ "${1:-}" == "--set-menubar-source" ]]; then
   exit 0
 fi
 
-# Provider contract: <id>_{fetch,export,postprocess,has_data,rows,
+# Provider contract: <id>_{fetch,export,postprocess,label,logo,has_data,rows,
 # update_header,render,takeover,settings,present,welcome}. Main orchestration
 # dispatches only through these hooks; source-specific behavior stays private.
 provider_call() {

@@ -83,6 +83,7 @@ It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cac
 - `/copilot_internal/user` is undocumented and could change without notice.
 - Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
 - Codex usage updates only after Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
+- A Codex or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
 - The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.
 
 ## Testing
