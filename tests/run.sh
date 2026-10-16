@@ -281,6 +281,30 @@ expect_not_contains "Sign in with GitHub"
 
 # RATION_TIMEOUT=1 shrinks the watchdog so these stay fast; the stubs
 # sleep past it to simulate a stalled network call.
+begin "a gh warning on stderr doesn't spoil a good response"
+make_gh "echo 'warning: gh is out of date' >&2; echo '$(copilot_json 75 750)'; exit 0"
+run_plugin
+expect_contains "Monthly:"
+expect_contains "25% used"
+expect_not_contains "Unexpected response from Copilot API"
+
+begin "cached Copilot data from before the reset reads as a full ration"
+mkdir -p "$FAKE_HOME/Library/Caches/ration"
+copilot_json 10 100 | sed 's/"quota_reset_date_utc": "[^"]*"/"quota_reset_date_utc": "2020-01-01T00:00:00.000Z"/' \
+  > "$FAKE_HOME/Library/Caches/ration/quota.json"
+make_gh "echo 'error connecting to api.github.com: no such host'; exit 1"
+run_plugin
+expect_contains "Offline · cached data from"
+expect_contains "Monthly:    [░░░░░░░░░░░░░░░░]   0% used"
+expect_contains "Resets unknown · 1000 of 1000 left"
+expect_not_contains "90% used"
+
+begin "a finished fetch leaves no watchdog sleep behind"
+make_gh_ok
+run_plugin RATION_TIMEOUT=37
+expect_check "watchdog sleep outlived the fetch" sh -c '! pgrep -qx -f "sleep 37"'
+pkill -x -f "sleep 37" 2>/dev/null
+
 begin "hung gh call times out instead of hanging the refresh"
 make_gh "sleep 2; echo 'never arrives'; exit 0"
 run_plugin RATION_TIMEOUT=1
@@ -317,6 +341,11 @@ run_plugin RATION_TIMEOUT=1
 expect_contains "**Copilot**"
 expect_contains "750 of 1000 left"
 expect_contains "**Antigravity**"
+
+begin "HTTP 401 reported on stderr, as real gh does, asks to sign in again"
+make_gh "echo '{\"message\": \"Bad credentials\"}'; echo 'gh: Bad credentials (HTTP 401)' >&2; exit 1"
+run_plugin
+expect_contains "GitHub sign-in expired"
 
 begin "HTTP 401 asks to sign in again"
 make_gh "echo 'HTTP 401: Bad credentials'; exit 1"

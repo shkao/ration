@@ -122,13 +122,20 @@ read_menubar_source() {
 
 # macOS has no `timeout`; without one a stalled network call would hang the
 # SwiftBar refresh indefinitely. The watchdog's output goes to /dev/null so
-# its sleep can't hold a caller's command-substitution pipe open. `:-` so an
-# empty override still means the default; tests shorten it via RATION_TIMEOUT.
+# its sleep can't hold a caller's command-substitution pipe open, and its trap
+# takes the sleep down with it, so a finished call leaves no process behind.
+# `:-` so an empty override still means the default; tests shorten it via
+# RATION_TIMEOUT.
 FETCH_TIMEOUT="${RATION_TIMEOUT:-15}"
 run_with_timeout() {
   "$@" &
   local cmd=$!
-  ( sleep "$FETCH_TIMEOUT" && kill "$cmd" ) >/dev/null 2>&1 &
+  (
+    sleep "$FETCH_TIMEOUT" &
+    sleeper=$!
+    trap 'kill "$sleeper"; exit' TERM
+    wait "$sleeper" && kill "$cmd"
+  ) >/dev/null 2>&1 &
   local dog=$!
   local rc=0
   wait "$cmd" || rc=$?
@@ -648,8 +655,17 @@ copilot_fetch() {
     return 0
   fi
 
-  RESPONSE="$(run_with_timeout "$GH_BIN" api /copilot_internal/user 2>&1)"
+  # stderr kept apart: a gh warning mixed into a good response would make it
+  # unparsable. Errors still need it, since gh reports the HTTP status there.
+  local err_file gh_err=""
+  err_file="$(mktemp "${TMPDIR:-/tmp}/ration-gh.XXXXXX" 2>/dev/null)"
+  RESPONSE="$(run_with_timeout "$GH_BIN" api /copilot_internal/user 2>"${err_file:-/dev/null}")"
   local api_exit=$?
+  if [[ -n "$err_file" ]]; then
+    gh_err="$(cat "$err_file")"
+    rm -f "$err_file"
+  fi
+  [[ $api_exit -ne 0 ]] && RESPONSE="${gh_err}${gh_err:+${RESPONSE:+ }}${RESPONSE}"
   # A watchdog kill leaves no output; give the error screens something to show.
   [[ $api_exit -ne 0 && -z "$RESPONSE" ]] && RESPONSE="gh api gave no response within ${FETCH_TIMEOUT}s"
   if [[ $api_exit -ne 0 ]]; then
@@ -727,6 +743,16 @@ if [[ -n "$EPOCH_END" && -n "$EPOCH_START" && "$EPOCH_END" -gt "$EPOCH_START" ]]
   ELAPSED_PCT=$(awk -v now="$EPOCH_NOW" -v s="$EPOCH_START" -v e="$EPOCH_END" \
     'BEGIN { v = (now - s) * 100 / (e - s); if (v < 0) v = 0; if (v > 100) v = 100; printf "%.4f", v }')
 else
+  ELAPSED_PCT=""
+fi
+
+# A cached snapshot from before the reset says nothing about the new month:
+# show a full ration with the reset unknown, as the other providers do.
+if [[ -n "$OFFLINE_ASOF" && -n "$EPOCH_END" ]] && (( EPOCH_END <= EPOCH_NOW )); then
+  ACTUAL_USED_PCT=0
+  PERCENT_REMAINING=100
+  REMAINING="$ENTITLEMENT"
+  EPOCH_END="null"
   ELAPSED_PCT=""
 fi
 
