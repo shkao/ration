@@ -64,7 +64,7 @@ Ration shows a section for each provider you already use, and setup instructions
 
 - **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
 - **Codex** needs a signed-in Codex app or CLI and one completed response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
-- **Antigravity** needs the [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) CLI (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`). It reports two weekly quotas: all Gemini models share one, all Claude and GPT models share the other.
+- **Antigravity** needs the [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) CLI (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`). Ration finds it on Homebrew's PATH or in an nvm-installed Node; other Node managers aren't searched. It reports two weekly quotas: all Gemini models share one, all Claude and GPT models share the other.
 
 ## Why "Ration"
 
