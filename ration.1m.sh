@@ -315,8 +315,10 @@ AGY_ASOF=""
 AGY_FETCHED=""
 # One jq pass over a snapshot: email on the first line, then one TSV row per
 # quota group. Empty output means the payload isn't a usable snapshot.
-# Weekly rolling window: elapsed = share of the 7 days already gone.
+# Weekly rolling window: elapsed = share of the 7 days already gone. A cached
+# snapshot whose reset has passed reads as an unused window, reset unknown.
 parse_antigravity() {
+  # shellcheck disable=SC2016
   "$JQ_BIN" -r '
     select((.models | length) > 0)
     | (.email // ""),
@@ -325,11 +327,14 @@ parse_antigravity() {
        | [["Gemini", map(select(.modelId | startswith("gemini")))],
           ["Claude+GPT", map(select(.modelId | test("^(claude|gpt)")))]][]
        | select(.[1] | length > 0)
-       | [.[0],
-          ((1 - .[1][0].remainingPercentage) * 100),
-          (.[1][0].resetTime | fromdate),
-          ((604800000 - .[1][0].timeUntilResetMs) / 604800000 * 100
-           | if . < 0 then 0 elif . > 100 then 100 else . end)]
+       | (.[1][0].resetTime | fromdate) as $reset
+       | if $reset <= now then [.[0], 0, "null", 0]
+         else [.[0],
+               ((1 - .[1][0].remainingPercentage) * 100),
+               $reset,
+               ((604800000 - .[1][0].timeUntilResetMs) / 604800000 * 100
+                | if . < 0 then 0 elif . > 100 then 100 else . end)]
+         end
        | @tsv)' 2>/dev/null
 }
 
@@ -435,8 +440,12 @@ codex_fetch() {
     while IFS=$'\t' read -r modified _size file; do
       [[ "$modified" -lt "$best" ]] && break
       # shellcheck disable=SC2016
-      snapshot="$(tail -r "$file" 2>/dev/null | "$JQ_BIN" -r --argjson modified "$modified" '
-        select(.type == "event_msg" and .payload.type == "token_count")
+      # A line Codex is still writing has no newline yet, and tail -r would
+      # glue it onto the newest complete line, so terminate it first. -R with
+      # fromjson? then skips it; a parse error would stop jq for the file.
+      snapshot="$({ cat "$file" 2>/dev/null; echo; } | tail -r | "$JQ_BIN" -rR --argjson modified "$modified" '
+        fromjson?
+        | select(.type == "event_msg" and .payload.type == "token_count")
         | ((.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601?) // $modified) as $recorded
         | .payload.rate_limits
         | select(.limit_id == "codex" and .primary.used_percent != null)
@@ -469,7 +478,14 @@ codex_fetch() {
       used="$secondary_used"; window="$secondary_window"; reset="$secondary_reset"
     fi
     [[ -z "$used" || -z "$window" || -z "$reset" ]] && continue
+    # A window that reset after the snapshot has no usage yet, and its next
+    # reset is unknown until Codex reports again. "null", not empty: tab is
+    # IFS whitespace, so an empty field would shift the ones after it.
+    if (( reset <= now )); then
+      used=0; reset="null"
+    fi
     elapsed="$(awk -v now="$now" -v reset="$reset" -v minutes="$window" 'BEGIN {
+      if (reset == "null") { printf "0"; exit }
       duration = minutes * 60
       value = (now - (reset - duration)) * 100 / duration
       if (value < 0) value = 0

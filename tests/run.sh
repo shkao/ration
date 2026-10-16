@@ -154,16 +154,20 @@ EOF
 # Antigravity CLI response. timeUntilResetMs drives the pace tick, so the
 # values below are fully deterministic: Gemini is 60% used at 50% of the
 # week (slightly over pace), Claude+GPT is untouched with a fresh window.
+# Reset times sit in the future so the windows still count as current.
 agy_json() {
-  cat <<'EOF'
+  local gemini_reset claude_reset
+  gemini_reset="$(date -u -v+3d "+%Y-%m-%dT%H:%M:%SZ")"
+  claude_reset="$(date -u -v+7d "+%Y-%m-%dT%H:%M:%SZ")"
+  cat <<EOF
 {
   "email": "octocat@example.com",
   "models": [
     {"label": "Gemini 3 Flash", "modelId": "gemini-3-flash",
-     "remainingPercentage": 0.40, "resetTime": "2026-07-15T12:00:00Z",
+     "remainingPercentage": 0.40, "resetTime": "${gemini_reset}",
      "timeUntilResetMs": 302400000, "isAutocompleteOnly": false},
     {"label": "Claude Opus", "modelId": "claude-opus-4-6-thinking",
-     "remainingPercentage": 1.0, "resetTime": "2026-07-20T12:00:00Z",
+     "remainingPercentage": 1.0, "resetTime": "${claude_reset}",
      "timeUntilResetMs": 604800000, "isAutocompleteOnly": false}
   ]
 }
@@ -391,6 +395,16 @@ seed_agy_cache
 run_plugin
 expect_contains "octocat@example.com · cached from"
 
+begin "a cached Antigravity quota past its reset reads as unused"
+make_gh_ok
+make_agy "exit 1"
+mkdir -p "$FAKE_HOME/Library/Caches/ration"
+agy_json | sed 's/"resetTime": "[^"]*"/"resetTime": "2020-01-01T00:00:00Z"/' \
+  > "$FAKE_HOME/Library/Caches/ration/antigravity.json"
+run_plugin
+expect_contains "Gemini:     [│░░░░░░░░░░░░░░░]   0% used"
+expect_not_contains "60% used"
+
 begin "antigravity CLI failure without cache degrades to one line"
 make_gh_ok
 make_agy "exit 1"
@@ -416,6 +430,25 @@ expect_contains "5 hours:    [████████│█░░░░░░] 
 expect_contains "Weekly:     [████░░░░│░░░░░░░]  25% used"
 expect_contains "ChatGPT Plus · local Codex snapshot"
 expect_contains "● Codex 5 hours slightly over pace"
+
+begin "Codex reads past a half-written line in the live session"
+GH_STUB=""
+seed_codex_snapshot
+printf '{"timestamp":"2026-08-01T10:00:05Z","type":"event_msg","payl' \
+  >> "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
+run_plugin
+expect_contains "5 hours:    [████████│█░░░░░░]  60% used"
+
+begin "a Codex window past its reset reads as unused, not stale"
+GH_STUB=""
+seed_codex_snapshot
+sed -i '' 's/"used_percent":60.0,"window_minutes":300,"resets_at":[0-9]*/"used_percent":99.0,"window_minutes":300,"resets_at":1000/' \
+  "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
+run_plugin
+expect_contains "5 hours:    [│░░░░░░░░░░░░░░░]   0% used"
+expect_contains "Resets unknown"
+expect_contains "25% | size=12.5"
+expect_not_contains "99% used"
 
 begin "Codex uses the newest snapshot in an old resumed session"
 GH_STUB=""
