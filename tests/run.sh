@@ -589,8 +589,13 @@ begin "menu bar source picker offers every set-up provider"
 make_gh_ok
 seed_codex_snapshot
 run_plugin
-expect_contains "Menu bar shows |"
+expect_contains "Indicator: Busiest quota |"
 expect_contains "--Busiest quota | bash="
+expect_contains "--Codex · busiest limit |"
+expect_contains "--Codex · 5 hours |"
+expect_contains "--Codex · weekly |"
+expect_not_contains "---5 hours"
+expect_not_contains "---Weekly"
 expect_contains "param1=--set-menubar-source param2=copilot"
 expect_contains "param1=--set-menubar-source param2=codex"
 expect_contains "param1=--set-menubar-source param2=codex-5-hours"
@@ -626,6 +631,7 @@ run_plugin
 expect_contains "60% | size=12.5 templateImage="
 expect_contains 'tooltip="Ration · Codex 60% used · 5 hours slightly over pace"'
 expect_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+expect_contains "Indicator: Codex · 5 hours |"
 expect_not_contains "param2=codex-weekly terminal=false refresh=true checked=true"
 
 begin "selecting the Codex weekly limit drives the menu bar"
@@ -636,6 +642,7 @@ run_plugin
 expect_contains "25% | size=12.5 templateImage="
 expect_contains 'tooltip="Ration · Codex 25% used · On pace"'
 expect_contains "param2=codex-weekly terminal=false refresh=true checked=true"
+expect_contains "Indicator: Codex · weekly |"
 expect_not_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
 
 begin "Codex picker only offers windows in the current snapshot"

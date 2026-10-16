@@ -593,16 +593,23 @@ menubar_source_params() {
 # Items keep their names here: a settings menu of three bare logos would make
 # you decode the marks before you could choose between them.
 print_menubar_source_menu() {
-  local provider label
-  echo "Menu bar shows | sfimage=menubar.rectangle"
-  echo "--Busiest quota | $(menubar_source_params auto) sfimage=gauge"
+  local provider label selected
+  case "$MENUBAR_SOURCE" in
+    auto) selected="Busiest quota" ;;
+    codex) selected="Codex · busiest limit" ;;
+    codex-5-hours) selected="Codex · 5 hours" ;;
+    codex-weekly) selected="Codex · weekly" ;;
+    *) selected="$(provider_call "$MENUBAR_PROVIDER" label)" ;;
+  esac
+  echo "Indicator: ${selected} | sfimage=menubar.rectangle"
+  echo "--Busiest quota | $(menubar_source_params auto) tooltip=\"Automatically follows the highest usage across all providers\" sfimage=gauge"
   for provider in "${PROVIDERS[@]}"; do
     [[ "$provider" == "$MENUBAR_PROVIDER" ]] || provider_call "$provider" present || continue
     label="$(provider_call "$provider" label)"
     if [[ "$provider" == "codex" ]]; then
-      echo "--${label} | $(menubar_source_params codex) templateImage=$(provider_call "$provider" logo)"
-      provider_call "$provider" rows "5 hours" >/dev/null && echo "---5 hours | $(menubar_source_params codex-5-hours)"
-      provider_call "$provider" rows "Weekly" >/dev/null && echo "---Weekly | $(menubar_source_params codex-weekly)"
+      echo "--${label} · busiest limit | $(menubar_source_params codex) templateImage=$(provider_call "$provider" logo) tooltip=\"Automatically follows the highest Codex usage\""
+      provider_call "$provider" rows "5 hours" >/dev/null && echo "--${label} · 5 hours | $(menubar_source_params codex-5-hours) templateImage=$(provider_call "$provider" logo)"
+      provider_call "$provider" rows "Weekly" >/dev/null && echo "--${label} · weekly | $(menubar_source_params codex-weekly) templateImage=$(provider_call "$provider" logo)"
     else
       echo "--${label} | $(menubar_source_params "$provider") templateImage=$(provider_call "$provider" logo)"
     fi
