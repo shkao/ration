@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Platform-macOS-lightgrey.svg" alt="Platform: macOS">
 </p>
 
-Your employer hands you a fixed ration of AI requests: GitHub Copilot premium requests, Codex usage limits, Google Antigravity model quotas. Nothing warns you when you're spending it too fast, so you find out you've run out the hard way, when a request gets refused days before the reset. Ration keeps that number in your macOS menu bar and turns it orange, then red, the moment you're ahead of pace. It's a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that installs in three commands and shows a section for each provider you use.
+Your employer hands you a fixed ration of AI requests: GitHub Copilot premium requests, Codex usage limits, Claude plan limits, Google Antigravity model quotas. Nothing warns you when you're spending it too fast, so you find out you've run out the hard way, when a request gets refused days before the reset. Ration keeps that number in your macOS menu bar and turns it orange, then red, the moment you're ahead of pace. It's a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that installs in three commands and shows a section for each provider you use.
 
 <p align="center">
   <picture>
@@ -33,9 +33,10 @@ Before installing, confirm these requirements:
 
 - **App:** macOS, [SwiftBar](https://github.com/swiftbar/SwiftBar) (`brew install --cask swiftbar`), and `jq` (`brew install jq`).
 - **Installer:** `git` is needed for the commands below. Homebrew is optional and only used by the example install commands.
-- **Quota source:** Set up at least one quota source. Providers work independently, so you don't need all three:
+- **Quota source:** Set up at least one quota source. Providers work independently, so you don't need all four:
   - **Copilot:** [GitHub CLI](https://cli.github.com/) signed in with `gh auth login` and an active Copilot seat.
   - **Codex:** a signed-in Codex app or CLI and one completed response. For the CLI, run `codex login` before using Codex.
+  - **Claude:** Claude Code signed in (`/login`) with a Pro, Max, Team, or Enterprise plan.
   - **Antigravity:** Node.js/npm plus [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage), installed with `npm install -g antigravity-usage` and signed in with `antigravity-usage login`.
 
 Ration doesn't need API keys. It uses each provider's existing local sign-in or session data.
@@ -64,6 +65,14 @@ Ration shows a section for each provider you already use, and setup instructions
 
 - **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
 - **Codex** needs a signed-in Codex app or CLI and one completed response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
+- **Claude** needs Claude Code signed in with a Claude plan. Ration reads the five-hour, weekly, and per-model weekly limits that `/usage` shows, which Claude Code and claude.ai share. It finds every account Claude Code has signed in on this Mac, one per config folder, and shows each with its own bars:
+
+  ```bash
+  claude                                          # personal account, ~/.claude
+  CLAUDE_CONFIG_DIR=~/.claude-work claude         # then /login with the work account
+  ```
+
+  The second account has its own Keychain item, so Ration needs no setup to show it. Team and Enterprise accounts are named by their organization; others read as Personal.
 - **Antigravity** needs the [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) CLI (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`). Ration finds it on Homebrew's PATH or in an nvm-installed Node; other Node managers aren't searched. It reports two weekly quotas: all Gemini models share one, all Claude and GPT models share the other.
 
 ## Why "Ration"
@@ -76,6 +85,8 @@ That's the whole app. The tick is today's fair share. Fill past it is bread eate
 
 Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own Copilot clients use, and refreshes every minute (the `1m` in `ration.1m.sh`, per SwiftBar's naming). It also reads the newest Codex rate-limit snapshot on disk, including resumed and archived sessions. Each provider shows when its data was fetched or recorded; cached responses keep their original timestamp. Re-run `./install.sh` to replace the old five-minute plugin with the one-minute version. These sources report snapshots, so Ration works out pace locally from each limit's reset time and window length.
 
+For Claude, it reads each account's access token from the macOS Keychain and asks `api.anthropic.com/api/oauth/usage`, the endpoint behind `/usage`, at most once every five minutes per account. The token goes to curl on stdin, so it never shows in a process list, and it never lands in Ration's cache. Ration doesn't refresh an expired token, because that would replace the one Claude Code holds. It shows the cached numbers and asks you to open Claude Code, which refreshes it.
+
 It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cache. It caches the last good provider responses at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration asks you to sign in when a previously detected Copilot account has no local token or GitHub rejects that token.
 
 ## Caveats
@@ -84,6 +95,7 @@ It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cac
 - Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
 - Codex usage updates only after Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
 - A Codex or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
+- `/api/oauth/usage` is undocumented and could change without notice. An account you haven't used in Claude Code for a while shows cached numbers until Claude Code refreshes its sign-in.
 - The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.
 
 ## Testing
@@ -92,7 +104,7 @@ It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cac
 ./tests/run.sh
 ```
 
-The suite runs the real plugin end to end against stub Copilot and Antigravity commands plus Codex session fixtures in an isolated `$HOME`. It covers provider combinations, pace escalation, exhausted states, Codex snapshot shapes, every error branch (offline, stalled calls, expired token, no Copilot seat, missing dependencies), concurrent fetches, both cache fallbacks, and installation into a custom per-user plugin folder. CI runs it on a macOS runner and ShellCheck on Linux.
+The suite runs the real plugin end to end against stub Copilot, Antigravity, Keychain, and Claude API commands plus Codex session fixtures in an isolated `$HOME`. It covers provider combinations, pace escalation, exhausted states, Codex snapshot shapes, every error branch (offline, stalled calls, expired token, no Copilot seat, missing dependencies), concurrent fetches, both cache fallbacks, and installation into a custom per-user plugin folder. CI runs it on a macOS runner and ShellCheck on Linux.
 
 ## Uninstall
 

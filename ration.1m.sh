@@ -3,7 +3,7 @@
 # <xbar.version>v3.1</xbar.version>
 # <xbar.author>Allen Kao</xbar.author>
 # <xbar.author.github>shkao</xbar.author.github>
-# <xbar.desc>Rations your AI quotas: tracks Copilot, Codex, and Antigravity pace so they last until reset</xbar.desc>
+# <xbar.desc>Rations your AI quotas: tracks Copilot, Codex, Claude, and Antigravity pace so they last until reset</xbar.desc>
 # <xbar.dependencies>jq,awk</xbar.dependencies>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
@@ -16,6 +16,8 @@ export LC_ALL=C
 # these with stubs, and setting an empty value simulates a missing dependency.
 GH_BIN="${RATION_GH-$(command -v gh)}"
 JQ_BIN="${RATION_JQ-$(command -v jq)}"
+SECURITY_BIN="${RATION_SECURITY-$(command -v security)}"
+CURL_BIN="${RATION_CURL-$(command -v curl)}"
 
 
 # Adaptive "light_appearance,dark_appearance" colors — needed because any line
@@ -34,13 +36,14 @@ BLUE="#0969da,#58a6ff"
 # templateImage= tints it for the current appearance. 30px tall tagged 144 DPI:
 # macOS reads the pHYs chunk and lays them out at 15pt, so they sit at menu bar
 # scale while keeping retina pixels — untagged, they render at 30pt and tower
-# over the percentage. Copilot and OpenAI come from simple-icons, Antigravity
+# over the percentage. Copilot, OpenAI, and Claude come from simple-icons, Antigravity
 # from a threshold of its own app icon, since no icon set carries that mark.
 # Inline because SwiftBar runs one file per plugin — a sidecar image folder
 # would be picked up as a second plugin.
 LOGO_COPILOT="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAACO0lEQVR4nMWUTWtTQRSGn9yEtKFF2yhNJQYXsS0VJO1KCyWiqAvdFgX1NyiibhTxF4hko6sus6guRNKSSmrtQsQfYNVWW2pBUXsJxZKkSZuM3GF6M/cjtSs9By7nvnPOzHs+ZuB/SaAF3sEoCXoR/OArbynvdcOz5KkiNK0wyZm/B8Z56QjTdZp468Ag91hvGWrpOncJ+uUc4Clj1JjiDUtU6Oc2R4AVHrJIhKOMcoEwz7iMcJ97CcECSQ0Zkaed1JAkCwjGvKRzCM650qhR02kC5xG88AavIOhyYZtsupBuBMveYNPTy7ik7a5wGXPHNLRTIrQ73EbkV88Z2ol42DBAA8FxB/ZKnjzjwFIIGgzokMG4dMyzz0buIFhjDcEtu6H7mZZ+403G/cxLaBHBBgWyTLCMoESaNCUES0yQpcCGbKfl+54+KzTGdzU/3TyRy5bWmWVYbj3MLHWF/uYxXcr+Rk+ALFcUA4tckD6ibPOFopbWAZKEKPKZOtjzlYUte3J1idFp253EHGtC6VbT1IOHqLJKm2rOKlWGfIJFs8/OhoRJcEjavSQIk/JzM/b4vvi+OIbfmFvZ+H6d8twqR17l0GQRJUdG2QEy5Ijaa4bynqLD+g3xQNZ8nquE2U3auCYHqsZ9/aqmmJH7mWRIqzo7w06RwZQ+hZ07oBfiNDe5KMlXeMcnfvFTdryHQU4QARpM8oi5VsQS3GCOsufpK/Ga6xx2Ovs/+iGOMchBWaYiJh/5wPau1fjH8gdqXu5Sxy7o3QAAAABJRU5ErkJggg=="
 LOGO_CODEX="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAADGUlEQVR4nJXVW2jXZRgH8M/mYUu98JQtSy9a6GC01BSiA53sRERkVMTQi8xcFwahjCQCwYuUVkHuqoUYYRkpSQecLoqcTmhDmzmrxcBZEi1DbTn+m9ve+L3+9j/4T7Lnvfg9z/s+3+d9jr+XYipT6wu/GNBjp4f9D6rRKRSsAyquDHqTc4LjVpiFueqcEvRq8IFGL7j28tBJTgi2KcvujLe+wIshjSb/O3iN4KAJWXmpYxHSrl6tNT4yLOg0s9jh1/0pWJrKlXZHYKd787SqHBfsV5rbmqgx2gwGlET3N8kI/lBn3CWXXK1XsCIXV7MgY3tMVUKbY3RvmRalEs/40uqsmacEHWPgjYJTbjZXcCTuNOlVlZ4udiBN1hF3pn7+bcTUhL1expDFsTBj4Hftj98KW43ocLtH/CQY9aE5+FawIFGoj8VRBC5T7y9Bm6vS+9Y6KzjvVV2CmmQzyenjReCTfpax2WsyetJzZnnHSFrvaPKQ4JYicLDbjZG/wS5Bi+rUwMLYvv2uS4QWwX1F4NaC8nxlxAVvmx6lSfYImil1FPfEzQymmRGLM1oAHrHdS2p1ew4DluvzoFtLfYxVsaJ9Vpmi24t5DTpGwxrN069JJU7HFD+RHCRO7EmHYbotLhjVVgD92tb4PTyWZfcL9ibM7FiSwxalqtX2CT4zL0qVPhGKwEuSOU8a/IzymMV2Ta5Blwc8psoxb9ikS40TRWFU4veEqREctcF5wTnrTIzH5bEt+61XrqXo5vcFaxNmgeBQLNUOo4Juj7pNu1HbzI6ql4IXGZa5eDbViDPpzNyhIx2DNktSF+frKQBX+02wYSyCBLAs5UuttE9tnOvE8JuGBA1R+l6w06Dg09ycL48/uYv9k6NxVusTDGowJZo9m/Z1g/E5tVLfxKTNz4Pe7buo+nlaMu4SnLYxK2dpZmz3QTvUedI6rRH4g4fy/GgVvFxUtEiTbYnR5dYreW06IU5ab3T/MlTheY3e0+CkoMfK+FbM8HQMoT+b//+gOQ6m9yeVT9aPFl4ZNKESy+zyqyF9mj2b94pk6R/pgUWJre5IQQAAAABJRU5ErkJggg=="
 LOGO_ANTIGRAVITY="iVBORw0KGgoAAAANSUhEUgAAACEAAAAeCAQAAAAIwb+cAAAACXBIWXMAABYlAAAWJQFJUiTwAAAB3klEQVR4nJWVz2sTQRiGn8R0TasghVrFENBbsCGth5raYNJjBVEx9aZ48iAiYo+lf4D3Qg+G5tDeehH0UC8ePKjYH5dSkdKAJVQRi0olFpuYrOw6nU53d3Y331wy3/vOM983TGZBH3085QsmP1jgJkdoO66yhinHTyYw2gMMsqkArLHHg3YA3bx0AKxR5UJ4xCNaHgiTmbAn0sOKJ8DkO8PhEGPUNQiTqTCADua1AJM1TgcjUnz2Qexxzbkg6kLkOOOzgcGVIESUQkCV+aBWklR82rDGb0b8qxggGVBFFzl/RD7EP+EycT3iGIOBAOjnnB5xnozD3uIvTUeul4vqNHZIvES3MtvkGe+pYZDhBgPKtnlmMb0KPMpz5eRfkFa0BFM0pPaRhHePab5K02vXBYtTkmqdojfiobRskfXQE7yTjhIRt6FLeWYmvPdglB3hqHDWLRek/JaTGkSMsvC0uO8UI7LTGtfRRx+fhO8NJw5L/WwJqUyHDwLGxaP4h9tq2mBOANZJBT7NC8K7zKmD9F127eQudwiOIVnxk/3neFh8M5pMOm6rLm6Jo6/937LAB3vaYJrjoQDW4T/ml73qG/dg0f65zTidIQFWRCmyYa/cgSVMVnUX1jeyvKJO9R88xQHabYBrtgAAAABJRU5ErkJggg=="
+LOGO_CLAUDE="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAACoUlEQVQ4y43UTWyUVRQG4GegQKHaAjUyGlhIiMQaU1gQFmo0EhfG4IIFssAGQReaEBJdqCQmXRAqARNLXPiTsDEGbUzaBQFNGhNJTTG2LojlpwaRKD8j1gmhlpHaHhdep99MZ0jfu/nue973nnvvOd+lEjvcNCSfYRq9YoU5YKG/hNCV4Q4Lx+di5jch/GFJmflV6K8tnlc1/wi02lGO53G+HH9Jj/X1Mi8yKoTRtOw9Qtidoq8L4bRcpWWb9vT9rBDCVtAmhMdBh+lkrsC7wqQ30orHhXDGfDwpTGnGY26nZXdWmrsS3Wcp1ibZdmwXRrHS1aT5uPqky3yZQj9Zj/fTd4O3hM8t8l2KD2mcfVE5e5SEULLbvW6kDXYLex1O1qIH6t10ux+SqNeBlOdT4URiw5Y7tcgCb/s75Q9h2sWyMXyYUS700KwewSOGM4aZMaZVs03e9JkzJoWvWZJpxf/zd5bLMjOuGjGVmZfsy7lgtZKiPxUV3VB0xWWrddY52iXDhg065VbONq9qcbelFtcqQ8KUH500YMCVbIkq0WKexRptcbDK/LOCohImjBlz2rFaWVb5JHXxzLjmkFMmK7juauNd9pkQxnW7WSE9qkGTTTr1GxfCcNY438upg/u1GxGOVtiPaUrKBhs9l63zGt+mFtwlp0f4yk7hHf8I53wvDGqtdc4X0lZ63Y89wjV5XcIT6Td5UY9w1qrZ5iGhkB6AR9025Wn0CWstVxCuy9sv/OLBanObZywDeZeF/fjvOWzBViF8gQ7jCvVesQVOCgMacJ8wkfheITyPh434prb5PeGSlWCzcDHxeb8L1zWjSVst6wbTCuUzdQqD5dhm08IGdbFGj3Xl2QmhLxN9zZHapaqF88IHcxVXo8MFT91J8C/UgET8KuWWhgAAAABJRU5ErkJggg=="
 
 # Deliberately outside the plugin folder: SwiftBar treats every executable in
 # its plugin directory as its own plugin and runs it automatically, which
@@ -48,7 +51,7 @@ LOGO_ANTIGRAVITY="iVBORw0KGgoAAAANSUhEUgAAACEAAAAeCAQAAAAIwb+cAAAACXBIWXMAABYlAA
 # on every SwiftBar launch instead of only when the user clicks the menu item.
 LOGIN_SCRIPT="${HOME}/.ration-helpers/ration-login.sh"
 BAR_WIDTH=16
-PROVIDERS=("copilot" "codex" "antigravity")
+PROVIDERS=("copilot" "codex" "claude" "antigravity")
 
 # Last successful API response, so going offline shows stale data instead of errors.
 CACHE_DIR="${HOME}/Library/Caches/ration"
@@ -554,6 +557,208 @@ codex_present() { [[ "$CODEX_STATE" != "absent" ]]; }
 codex_welcome() {
   echo "For Codex (signed-in local app or CLI): | size=12"
   echo "Complete one response to create a usage snapshot | size=11 color=${SECONDARY_COLOR}"
+}
+
+# Claude plan limits (Pro, Max, Team, Enterprise): the numbers Claude Code's
+# /usage shows, shared with claude.ai. Claude Code keeps one Keychain item per
+# config dir, "Claude Code-credentials" for ~/.claude plus an 8-hex suffix
+# (sha256 of the path) for each CLAUDE_CONFIG_DIR, so every item is one
+# signed-in account and a personal plus a work account need no Ration setup.
+# Ration only reads the access token: refreshing it would rotate the token
+# Claude Code holds, so an expired one waits for Claude Code to run again.
+CLAUDE_STATE="absent" # absent | ok (at least one account found)
+CLAUDE_NAMES=()       # per account: Personal, or the Team/Enterprise org name
+CLAUDE_PLANS=()
+CLAUDE_ROWSETS=()     # per account: one limit per line: label, used%, reset epoch, elapsed%
+CLAUDE_WARNINGS=()    # per account: why the rows are missing or stale
+CLAUDE_NOTES=()       # per account: email and when the data was fetched
+CLAUDE_API="https://api.anthropic.com/api/oauth"
+# The usage endpoint rate-limits frequent polling, and a 5-hour window barely
+# moves in a minute, so each account is asked at most once per interval.
+CLAUDE_MIN_INTERVAL=300
+
+claude_services() {
+  "$SECURITY_BIN" dump-keychain 2>/dev/null \
+    | sed -n 's/^ *"svce"<blob>="\(Claude Code-credentials\(-[0-9a-f]\{8\}\)\{0,1\}\)"$/\1/p' \
+    | sort -u
+}
+
+# The token travels on curl's stdin, never in argv where `ps` would show it.
+# Prints the body, then the HTTP status on a line of its own.
+claude_request() {
+  printf 'Authorization: Bearer %s\nanthropic-beta: oauth-2025-04-20\n' "$CLAUDE_TOKEN" \
+    | "$CURL_BIN" -sS -H @- -w '\n%{http_code}' "${CLAUDE_API}/$1"
+}
+
+# One jq pass over {subscription, tier, profile, usage}: account name, plan,
+# and email on the first three lines, then one TSV row per limit. Windows are
+# fixed (5 hours, 7 days), so elapsed comes from the reset time. A window
+# without a reset, or one past it in a cached snapshot, reads as unused.
+parse_claude() {
+  # shellcheck disable=SC2016
+  "$JQ_BIN" -r '
+    def epoch: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
+    (if .subscription == "team" or .subscription == "enterprise"
+     then .profile.organization.name // "Team" else "Personal" end),
+    ((.subscription // "" | if . == "" then "Claude" else (.[:1] | ascii_upcase) + .[1:] end)
+     + ((.tier // "" | capture("_(?<n>[0-9]+x)$") | " " + .n) // "")),
+    (.profile.account.email // ""),
+    ([["5 hours", .usage.five_hour.utilization, .usage.five_hour.resets_at, 18000],
+      ["Weekly", .usage.seven_day.utilization, .usage.seven_day.resets_at, 604800]]
+     + [.usage.limits[]? | select(.kind == "weekly_scoped")
+        | [(.scope.model.display_name // "Model"), .percent, .resets_at, 604800]]
+     | .[] | select(.[1] != null)
+     | (if .[2] == null then null else (.[2] | epoch) end) as $reset
+     | if $reset == null or $reset <= now then [.[0], 0, "null", 0]
+       else [.[0], .[1], $reset,
+             ((now - ($reset - .[3])) / .[3] * 100
+              | if . < 0 then 0 elif . > 100 then 100 else . end)]
+       end
+     | @tsv)' 2>/dev/null
+}
+
+claude_fetch_account() {
+  local service="$1" cache creds token expires subscription tier now mtime=0
+  local json="" warning="" fetched="" asof="" response status profile parsed
+  cache="${CACHE_DIR}/claude${service#Claude Code-credentials}.json"
+  creds="$("$SECURITY_BIN" find-generic-password -s "$service" -w 2>/dev/null)"
+  # Process substitution, not a here-string: bash 3.2 backs a here-string
+  # with a temp file, and this one would hold the token.
+  IFS=$'\t' read -r token expires subscription tier < <(printf '%s' "$creds" \
+    | "$JQ_BIN" -r '.claudeAiOauth | [(.accessToken // "-"), (.expiresAt // 0),
+        (.subscriptionType // "-"), (.rateLimitTier // "-")] | @tsv' 2>/dev/null)
+  [[ "$subscription" == "-" ]] && subscription=""
+  [[ "$tier" == "-" ]] && tier=""
+  now="$(date +%s)"
+  [[ -s "$cache" ]] && mtime="$(stat -f %m "$cache" 2>/dev/null)"
+
+  if (( now - mtime < CLAUDE_MIN_INTERVAL )); then
+    json="$(cat "$cache")"
+    fetched="$mtime"
+  elif [[ -z "$token" || "$token" == "-" ]] || (( ${expires:-0} / 1000 <= now )); then
+    warning="Sign-in expired · open Claude Code to refresh"
+  else
+    CLAUDE_TOKEN="$token"
+    response="$(run_with_timeout claude_request usage 2>/dev/null)"
+    status="${response##*$'\n'}"
+    if [[ "$status" == "200" ]]; then
+      profile="$(run_with_timeout claude_request profile 2>/dev/null)"
+      if [[ "${profile##*$'\n'}" == "200" ]]; then
+        profile="${profile%$'\n'*}"
+      else
+        profile="$("$JQ_BIN" -c '.profile // {}' "$cache" 2>/dev/null)"
+      fi
+      [[ -z "$profile" ]] && profile="{}"
+      # shellcheck disable=SC2016
+      json="$("$JQ_BIN" -cn --argjson usage "${response%$'\n'*}" --argjson profile "$profile" \
+        --arg subscription "$subscription" --arg tier "$tier" \
+        '{subscription: $subscription, tier: $tier, profile: $profile, usage: $usage}' 2>/dev/null)"
+      if [[ -n "$json" ]]; then
+        write_cache "$cache" "$json"
+        fetched="$now"
+      else
+        warning="Unexpected response from the Claude usage API"
+      fi
+    elif [[ "$status" == "401" ]]; then
+      warning="Sign-in expired · open Claude Code to refresh"
+    elif [[ "$status" =~ ^[0-9]{3}$ && "$status" != "000" ]]; then
+      warning="Claude usage API answered HTTP ${status}"
+    else
+      warning="Claude usage API is unreachable"
+    fi
+    unset CLAUDE_TOKEN
+  fi
+
+  if [[ -z "$json" && -s "$cache" ]]; then
+    json="$(cat "$cache")"
+    asof="$(date -r "$mtime" '+%-d %b %H:%M')"
+  fi
+  # shellcheck disable=SC2016
+  [[ -z "$json" ]] && json="$("$JQ_BIN" -cn --arg subscription "$subscription" --arg tier "$tier" \
+    '{subscription: $subscription, tier: $tier}')"
+  parsed="$(parse_claude <<< "$json")"
+  [[ -z "$parsed" ]] && return 0
+
+  local name plan email rows="" note
+  { IFS= read -r name; IFS= read -r plan; IFS= read -r email; } <<< "$parsed"
+  [[ "$(wc -l <<< "$parsed")" -gt 3 ]] && rows="$(sed '1,3d' <<< "$parsed")"
+  [[ -z "$rows" && -z "$warning" ]] && warning="Unexpected response from the Claude usage API"
+  note="$(sanitize_error "$email")"
+  [[ -n "$fetched" ]] && note="${note:+${note} · }fetched at $(date -r "$fetched" '+%-d %b %H:%M')"
+  [[ -n "$asof" ]] && note="${note:+${note} · }cached from ${asof}"
+  CLAUDE_NAMES+=("$(sanitize_error "$name")")
+  CLAUDE_PLANS+=("$plan")
+  CLAUDE_ROWSETS+=("$rows")
+  CLAUDE_WARNINGS+=("$warning")
+  CLAUDE_NOTES+=("$note")
+}
+
+claude_fetch() {
+  [[ -z "$SECURITY_BIN" || -z "$CURL_BIN" ]] && return 0
+  local services service
+  services="$(claude_services)"
+  while IFS= read -r service; do
+    [[ -n "$service" ]] && claude_fetch_account "$service"
+  done <<< "$services"
+  (( ${#CLAUDE_NAMES[@]} > 0 )) && CLAUDE_STATE="ok"
+}
+
+claude_export() {
+  declare -p CLAUDE_STATE CLAUDE_NAMES CLAUDE_PLANS CLAUDE_ROWSETS CLAUDE_WARNINGS CLAUDE_NOTES
+}
+
+claude_postprocess() { :; }
+claude_label() { echo "Claude"; }
+claude_logo() { echo "$LOGO_CLAUDE"; }
+claude_has_data() {
+  local rows
+  for rows in "${CLAUDE_ROWSETS[@]}"; do
+    [[ -n "$rows" ]] && return 0
+  done
+  return 1
+}
+claude_rows() {
+  claude_has_data || return 1
+  local rows
+  for rows in "${CLAUDE_ROWSETS[@]}"; do
+    [[ -n "$rows" ]] && printf '%s\n' "$rows"
+  done
+}
+# With two accounts, "Claude Weekly over pace" wouldn't say which plan is
+# burning, so the account name joins the status.
+claude_update_header() {
+  local i name
+  for i in "${!CLAUDE_NAMES[@]}"; do
+    [[ -z "${CLAUDE_ROWSETS[i]}" ]] && continue
+    name="$(claude_label)"
+    (( ${#CLAUDE_NAMES[@]} > 1 )) && name+=" ${CLAUDE_NAMES[i]}"
+    update_header_from_rows "$name" "${CLAUDE_ROWSETS[i]}"
+  done
+}
+
+claude_render() {
+  [[ "$CLAUDE_STATE" != "ok" ]] && return 0
+  echo "---"
+  echo "**Claude** | md=true size=13"
+  local i
+  for i in "${!CLAUDE_NAMES[@]}"; do
+    echo "${CLAUDE_NAMES[i]} · ${CLAUDE_PLANS[i]} | size=12"
+    [[ -n "${CLAUDE_ROWSETS[i]}" ]] && print_quota_rows "${CLAUDE_ROWSETS[i]}"
+    [[ -n "${CLAUDE_WARNINGS[i]}" ]] && echo "${CLAUDE_WARNINGS[i]} | size=11 color=${ORANGE}"
+    [[ -n "${CLAUDE_NOTES[i]}" ]] && echo "${CLAUDE_NOTES[i]} | size=11 color=${SECONDARY_COLOR}"
+  done
+}
+
+claude_takeover() { return 1; }
+claude_settings() {
+  if [[ "$CLAUDE_STATE" == "ok" ]]; then
+    echo "Open Claude usage | href=https://claude.ai/settings/usage sfimage=gearshape"
+  fi
+}
+claude_present() { [[ "$CLAUDE_STATE" != "absent" ]]; }
+claude_welcome() {
+  echo "For Claude (Pro, Max, Team, or Enterprise plan): | size=12"
+  echo "Sign in to Claude Code with /login | font=Menlo size=11 color=${SECONDARY_COLOR}"
 }
 
 # Shared chrome for full-menu (takeover) screens: menu bar glyph, app header,

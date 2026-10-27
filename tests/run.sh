@@ -70,6 +70,43 @@ $(agy_json)
 JSON"
 }
 
+# Keychain stub: one file per Claude Code credentials item under
+# $FAKE_HOME/keychain, listed by `dump-keychain` and read back by
+# `find-generic-password -s NAME -w`, as the real `security` does.
+make_security() {
+  SECURITY_STUB="$TMP/security-$RANDOM"
+  cat > "$SECURITY_STUB" <<EOF
+#!/bin/bash
+dir='$FAKE_HOME/keychain'
+if [[ "\$1" == "dump-keychain" ]]; then
+  for item in "\$dir"/*; do
+    [[ -e "\$item" ]] && printf '    "svce"<blob>="%s"\n' "\$(basename "\$item")"
+  done
+  exit 0
+fi
+[[ "\$1" == "find-generic-password" && "\$2" == "-s" ]] && cat "\$dir/\$3"
+EOF
+  chmod +x "$SECURITY_STUB"
+}
+
+# curl stub for the Claude API: the token arrives in the headers on stdin,
+# and the response comes from $FAKE_HOME/claude-api/<token>/<endpoint>,
+# whose last line is the HTTP status. Every call logs its argv so tests can
+# check the token never appears there.
+make_curl() {
+  CURL_STUB="$TMP/curl-$RANDOM"
+  cat > "$CURL_STUB" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> '$FAKE_HOME/curl-argv'
+token="\$(sed -n 's/^Authorization: Bearer //p')"
+response='$FAKE_HOME/claude-api/'"\$token/\$(basename "\${!#}")"
+[[ -e "\$response" ]] || exit 7
+body="\$(sed '\$d' "\$response")"
+printf '%s\n%s' "\$body" "\$(tail -1 "\$response")"
+EOF
+  chmod +x "$CURL_STUB"
+}
+
 # Run the plugin with the seams pointed at the stubs. Extra VAR=value
 # arguments go last so they override the defaults (`env` lets the final
 # assignment win).
@@ -79,6 +116,8 @@ run_plugin() {
     RATION_GH="${GH_STUB:-}" \
     RATION_JQ="$JQ" \
     RATION_AGY="${AGY_STUB:-}" \
+    RATION_SECURITY="${SECURITY_STUB:-}" \
+    RATION_CURL="${CURL_STUB:-}" \
     "$@" \
     "$PLUGIN" 2>/dev/null)"
 }
@@ -87,6 +126,8 @@ begin() {
   CURRENT_TEST="$1"
   GH_STUB=""
   AGY_STUB=""
+  SECURITY_STUB=""
+  CURL_STUB=""
   new_home
 }
 
@@ -208,6 +249,47 @@ seed_codex_snapshot_without_plan() {
   printf '%s\n' \
     "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":2.0,\"window_minutes\":10080,\"resets_at\":${weekly_reset}},\"secondary\":null}}}" \
     > "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
+}
+
+# Claude usage API response. Both windows sit halfway through, so 60% of
+# the five-hour limit is slightly over pace and 20% of the week is on pace.
+claude_usage_json() {
+  local five_hour="${1:-60}" weekly="${2:-20}" five_hour_reset weekly_reset
+  five_hour_reset="$(date -u -v+150M "+%Y-%m-%dT%H:%M:%S.123456+00:00")"
+  weekly_reset="$(date -u -v+84H "+%Y-%m-%dT%H:%M:%S.123456+00:00")"
+  cat <<EOF
+{"five_hour": {"utilization": ${five_hour}.0, "resets_at": "${five_hour_reset}"},
+ "seven_day": {"utilization": ${weekly}.0, "resets_at": "${weekly_reset}"},
+ "limits": [
+   {"kind": "session", "percent": ${five_hour}, "resets_at": "${five_hour_reset}"},
+   {"kind": "weekly_scoped", "percent": 10, "resets_at": "${weekly_reset}",
+    "scope": {"model": {"display_name": "Fable"}}}]}
+EOF
+}
+
+claude_profile_json() {
+  printf '{"account": {"email": "%s"}, "organization": {"name": "%s"}}\n' "$1" "$2"
+}
+
+# seed_claude_account SERVICE TOKEN SUBSCRIPTION TIER EMAIL ORG [USAGE] [STATUS]
+# stores a Keychain item and the API answers for its token. The access token
+# expires in an hour unless EXPIRES_MS is set.
+seed_claude_account() {
+  local service="$1" token="$2" subscription="$3" tier="$4" email="$5" org="$6"
+  local usage="${7:-$(claude_usage_json)}" status="${8:-200}"
+  local expires="${EXPIRES_MS:-$(( ($(date +%s) + 3600) * 1000 ))}"
+  mkdir -p "$FAKE_HOME/keychain" "$FAKE_HOME/claude-api/$token"
+  printf '{"claudeAiOauth": {"accessToken": "%s", "expiresAt": %s, "subscriptionType": "%s", "rateLimitTier": "%s"}}\n' \
+    "$token" "$expires" "$subscription" "$tier" > "$FAKE_HOME/keychain/$service"
+  printf '%s\n%s\n' "$usage" "$status" > "$FAKE_HOME/claude-api/$token/usage"
+  printf '%s\n200\n' "$(claude_profile_json "$email" "$org")" > "$FAKE_HOME/claude-api/$token/profile"
+  [[ -n "$SECURITY_STUB" ]] || make_security
+  [[ -n "$CURL_STUB" ]] || make_curl
+}
+
+seed_personal_claude() {
+  seed_claude_account "Claude Code-credentials" tok-personal max default_claude_max_5x \
+    me@example.com "Octo Cat" "$@"
 }
 
 seed_copilot_cache() {
@@ -368,6 +450,7 @@ expect_contains "GitHub CLI + active Copilot seat"
 expect_contains "gh auth login"
 expect_contains "signed-in local app or CLI"
 expect_contains "antigravity-usage login"
+expect_contains "Sign in to Claude Code with /login"
 
 begin "signed out with a cache still prompts to sign back in"
 make_gh "exit 0"
@@ -580,6 +663,88 @@ expect_contains "**Copilot**"
 expect_contains "GitHub sign-in expired"
 expect_contains "**Antigravity**"
 
+begin "claude section renders plan limits for the signed-in account"
+seed_personal_claude
+run_plugin
+expect_contains "**Claude**"
+expect_contains "Personal · Max 5x | size=12"
+expect_contains "5 hours:    [████████│█░░░░░░]  60% used"
+expect_contains "Weekly:     [███░░░░░│░░░░░░░]  20% used"
+expect_contains "Fable:      [██░░░░░░│░░░░░░░]  10% used"
+expect_contains "me@example.com · fetched at"
+expect_contains "● Claude 5 hours slightly over pace"
+expect_contains "Open Claude usage | href=https://claude.ai/settings/usage"
+expect_check "token reached curl's argv" sh -c "! grep -q tok-personal '$FAKE_HOME/curl-argv'"
+expect_check "token reached the cache" sh -c "! grep -rq tok-personal '$FAKE_HOME/Library/Caches/ration'"
+
+begin "claude shows each signed-in account and names the one off pace"
+seed_personal_claude "$(claude_usage_json 10 5)"
+seed_claude_account "Claude Code-credentials-1a2b3c4d" tok-work team default_claude_team \
+  me@acme.example "Acme Corp" "$(claude_usage_json 95 20)"
+run_plugin
+expect_contains "Personal · Max 5x | size=12"
+expect_contains "Acme Corp · Team | size=12"
+expect_contains "me@acme.example · fetched at"
+expect_contains "● Claude Acme Corp 5 hours burning fast"
+# The title follows the busiest quota across both accounts.
+expect_contains "95% | size=12.5"
+
+begin "claude ignores Keychain items that aren't Claude Code sign-ins"
+seed_personal_claude
+mkdir -p "$FAKE_HOME/keychain"
+printf '{}\n' > "$FAKE_HOME/keychain/Claude Safe Storage"
+run_plugin
+expect_not_contains "Claude Safe Storage"
+expect_check "a non-credential item was read as an account" test "$(grep -c '| size=12$' <<< "$OUTPUT")" -eq 1
+
+begin "claude asks at most once per interval"
+seed_personal_claude
+run_plugin
+run_plugin
+expect_check "second refresh called the API again" test "$(grep -c '/usage' "$FAKE_HOME/curl-argv")" -eq 1
+expect_contains "60% used"
+
+begin "an expired Claude token skips the API and says how to refresh"
+EXPIRES_MS=1000 seed_personal_claude
+run_plugin
+expect_contains "Personal · Max 5x | size=12"
+expect_contains "Sign-in expired · open Claude Code to refresh"
+expect_check "expired token was sent anyway" test ! -e "$FAKE_HOME/curl-argv"
+
+begin "a rejected Claude token falls back to the cached limits"
+seed_personal_claude
+mkdir -p "$FAKE_HOME/Library/Caches/ration"
+# shellcheck disable=SC2016
+"$JQ" -cn --argjson usage "$(claude_usage_json 40 30)" --argjson profile "$(claude_profile_json me@example.com x)" \
+  '{subscription: "max", tier: "default_claude_max_5x", profile: $profile, usage: $usage}' \
+  > "$FAKE_HOME/Library/Caches/ration/claude.json"
+touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude.json"
+printf '{"error": "unauthorized"}\n401\n' > "$FAKE_HOME/claude-api/tok-personal/usage"
+run_plugin
+expect_contains "40% used"
+expect_contains "Sign-in expired · open Claude Code to refresh"
+expect_contains "me@example.com · cached from"
+
+begin "a rate-limited Claude API without a cache explains itself"
+seed_personal_claude '{"error": "rate_limited"}' 429
+run_plugin
+expect_contains "Personal · Max 5x | size=12"
+expect_contains "Claude usage API answered HTTP 429"
+expect_not_contains "% used"
+
+begin "a cached Claude window past its reset reads as unused"
+seed_personal_claude '{}' 503
+mkdir -p "$FAKE_HOME/Library/Caches/ration"
+# shellcheck disable=SC2016
+"$JQ" -cn --argjson usage "$(claude_usage_json 90 30 | sed 's/"resets_at": "[^"]*"/"resets_at": "2020-01-01T00:00:00+00:00"/g')" \
+  '{subscription: "max", tier: "", profile: {}, usage: $usage}' \
+  > "$FAKE_HOME/Library/Caches/ration/claude.json"
+touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude.json"
+run_plugin
+expect_contains "5 hours:    [│░░░░░░░░░░░░░░░]   0% used"
+expect_not_contains "90% used"
+expect_contains "Personal · Max | size=12"
+
 pin_menubar_source() {
   mkdir -p "$FAKE_HOME/.config/ration"
   printf '%s\n' "$1" > "$FAKE_HOME/.config/ration/menubar-source"
@@ -670,6 +835,16 @@ run_plugin
 expect_contains "2% | size=12.5 templateImage="
 expect_contains "● Burning through the ration · may run out before reset"
 
+begin "pinning Claude follows its busiest account"
+make_gh_ok
+seed_personal_claude
+pin_menubar_source claude
+run_plugin
+expect_contains "60% | size=12.5 templateImage="
+expect_contains 'tooltip="Ration · Claude 60% used · 5 hours slightly over pace"'
+expect_contains "param2=claude terminal=false refresh=true checked=true"
+expect_contains "Indicator: Claude |"
+
 begin "a burning pinned provider keeps the warning glyph over its mark"
 GH_STUB=""
 make_agy "echo '$(agy_exhausted_json)'"
@@ -699,8 +874,8 @@ expect_contains "param2=auto terminal=false refresh=true checked=true"
 
 begin "all providers implement the shared lifecycle contract"
 expect_check "provider registry is missing" grep -qF \
-  'PROVIDERS=("copilot" "codex" "antigravity")' "$PLUGIN"
-for provider in copilot codex antigravity; do
+  'PROVIDERS=("copilot" "codex" "claude" "antigravity")' "$PLUGIN"
+for provider in copilot codex claude antigravity; do
   contract_ok=true
   for hook in fetch export postprocess label logo has_data rows update_header render takeover settings present welcome; do
     grep -qE "^${provider}_${hook}\\(\\)" "$PLUGIN" || contract_ok=false
