@@ -63,6 +63,12 @@ SWIFTBAR_PLUGIN_DIR="$HOME/path/to/swiftbar-plugins" ./install.sh
 
 Ration shows a section for each provider you already use, and setup instructions when it finds none. Each provider works independently.
 
+To hide a provider you have set up but don't want to watch, list the ones to keep in `~/.config/ration/providers`, one per line (`copilot`, `codex`, `claude`, `antigravity`). Ration never fetches the rest. Delete the file to show everything again:
+
+```bash
+mkdir -p ~/.config/ration && printf 'codex\nclaude\n' > ~/.config/ration/providers
+```
+
 - **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
 - **Codex** needs a signed-in Codex app or CLI and one completed response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
 - **Claude** needs Claude Code signed in with a Claude plan. Ration reads the five-hour, weekly, and per-model weekly limits that `/usage` shows, which Claude Code and claude.ai share. It finds every account Claude Code has signed in on this Mac, one per config folder, and shows each with its own bars:

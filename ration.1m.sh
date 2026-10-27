@@ -66,6 +66,19 @@ CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
 CONFIG_DIR="${HOME}/.config/ration"
 MENUBAR_SOURCE_FILE="${CONFIG_DIR}/menubar-source"
 
+# Optional allowlist of providers to show, one id per line. Unlisted providers
+# are never fetched or rendered. A missing file, or one naming no known
+# provider, keeps them all, so a typo can't blank the menu.
+PROVIDERS_FILE="${CONFIG_DIR}/providers"
+if [[ -s "$PROVIDERS_FILE" ]]; then
+  ENABLED_PROVIDERS=()
+  for provider in "${PROVIDERS[@]}"; do
+    grep -qxE "[[:space:]]*${provider}[[:space:]]*" "$PROVIDERS_FILE" 2>/dev/null \
+      && ENABLED_PROVIDERS+=("$provider")
+  done
+  (( ${#ENABLED_PROVIDERS[@]} > 0 )) && PROVIDERS=("${ENABLED_PROVIDERS[@]}")
+fi
+
 # The picker menu items re-run this same file with the flag below, which keeps
 # the setting self-contained instead of needing a second helper script.
 SELF="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
@@ -112,13 +125,15 @@ provider_any_present() {
 # An unreadable or stale file (a provider that no longer exists) falls back to
 # "auto" rather than pinning the menu bar to a source that can never report.
 read_menubar_source() {
-  local value="auto" provider
+  local value="auto" provider owner
   [[ -s "$MENUBAR_SOURCE_FILE" ]] && value="$(sed -n '1p' "$MENUBAR_SOURCE_FILE" 2>/dev/null)"
   case "$value" in
-    auto|codex-5-hours|codex-weekly) echo "$value"; return ;;
+    auto) echo "$value"; return ;;
+    codex-5-hours|codex-weekly) owner="codex" ;;
+    *) owner="$value" ;;
   esac
   for provider in "${PROVIDERS[@]}"; do
-    [[ "$provider" == "$value" ]] && { echo "$value"; return; }
+    [[ "$provider" == "$owner" ]] && { echo "$value"; return; }
   done
   echo "auto"
 }

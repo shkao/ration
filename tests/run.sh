@@ -872,6 +872,45 @@ run_plugin
 expect_contains "25% | size=12.5"
 expect_contains "param2=auto terminal=false refresh=true checked=true"
 
+set_providers() {
+  mkdir -p "$FAKE_HOME/.config/ration"
+  printf '%s\n' "$@" > "$FAKE_HOME/.config/ration/providers"
+}
+
+begin "providers file hides unlisted providers without fetching them"
+make_gh "touch '$FAKE_HOME/gh-called'; echo '$(copilot_json 75 750)'"
+make_agy "touch '$FAKE_HOME/agy-called'; cat <<'JSON'
+$(agy_json)
+JSON"
+seed_codex_snapshot
+set_providers codex " claude "
+run_plugin
+expect_contains "**Codex**"
+expect_not_contains "**Copilot**"
+expect_not_contains "**Antigravity**"
+expect_not_contains "param2=copilot"
+expect_not_contains "param2=antigravity"
+expect_check "hidden Copilot was still fetched" test ! -e "$FAKE_HOME/gh-called"
+expect_check "hidden Antigravity was still fetched" test ! -e "$FAKE_HOME/agy-called"
+
+begin "a pin to a hidden provider falls back to the busiest quota"
+make_gh_ok
+seed_codex_snapshot
+set_providers copilot
+pin_menubar_source codex-weekly
+run_plugin
+expect_contains "25% | size=12.5"
+expect_not_contains "**Codex**"
+expect_contains "param2=auto terminal=false refresh=true checked=true"
+
+begin "a providers file naming nothing known shows every provider"
+make_gh_ok
+seed_codex_snapshot
+set_providers copliot
+run_plugin
+expect_contains "**Copilot**"
+expect_contains "**Codex**"
+
 begin "all providers implement the shared lifecycle contract"
 expect_check "provider registry is missing" grep -qF \
   'PROVIDERS=("copilot" "codex" "claude" "antigravity")' "$PLUGIN"
