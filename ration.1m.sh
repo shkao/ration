@@ -60,9 +60,10 @@ CODEX_HOME="${HOME}/.codex"
 CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
 
 # Which quota drives the menu bar number: "auto" (busiest across providers), a
-# provider id, or a Codex window id, so a pinned tool stays readable without
-# opening the dropdown. Kept outside the cache dir, so clearing caches doesn't
-# reset it; the README's uninstall step removes it explicitly.
+# provider id, a Codex window id, or a Claude account id, so a pinned tool
+# stays readable without opening the dropdown. Kept outside the cache dir, so
+# clearing caches doesn't reset it; the README's uninstall step removes it
+# explicitly.
 CONFIG_DIR="${HOME}/.config/ration"
 MENUBAR_SOURCE_FILE="${CONFIG_DIR}/menubar-source"
 
@@ -130,6 +131,7 @@ read_menubar_source() {
   case "$value" in
     auto) echo "$value"; return ;;
     codex-5-hours|codex-weekly) owner="codex" ;;
+    claude-*) owner="claude" ;;
     *) owner="$value" ;;
   esac
   for provider in "${PROVIDERS[@]}"; do
@@ -298,22 +300,28 @@ update_header_from_rows() {
 # Roll pace up into the HEADER_* globals. $1 limits the roll-up to a single
 # provider (empty = all of them), and $2 optionally limits Codex to one window.
 # That is how a pinned menu bar reports only the quota it names.
+# Highest used% across TSV quota rows on stdin, rounded; nothing when empty.
+max_used_pct() {
+  awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
+    END { if (seen) printf "%.0f", max }'
+}
+
 compute_header() {
-  local only="$1" codex_limit="${2:-}" provider
+  local only="$1" selector="${2:-}" provider
   HEADER_COLOR="$GREEN"
   HEADER_STATUS="On pace"
   HEADER_ICON=""
   for provider in "${PROVIDERS[@]}"; do
     [[ -n "$only" && "$provider" != "$only" ]] && continue
-    if [[ "$provider" == "codex" && -n "$codex_limit" ]]; then
-      provider_call "$provider" update_header "$codex_limit"
+    if [[ -n "$selector" ]]; then
+      provider_call "$provider" update_header "$selector"
     else
       provider_call "$provider" update_header
     fi
   done
   if [[ -n "$only" ]]; then
-    if [[ "$only" == "codex" && -n "$codex_limit" ]]; then
-      provider_call "$only" rows "$codex_limit" >/dev/null && return 0
+    if [[ -n "$selector" ]]; then
+      provider_call "$only" rows "$selector" >/dev/null && return 0
     elif provider_call "$only" has_data; then
       return 0
     fi
@@ -582,6 +590,7 @@ codex_welcome() {
 # Ration only reads the access token: refreshing it would rotate the token
 # Claude Code holds, so an expired one waits for Claude Code to run again.
 CLAUDE_STATE="absent" # absent | ok (at least one account found)
+CLAUDE_IDS=()         # per account: Keychain suffix, or "default" for ~/.claude
 CLAUDE_NAMES=()       # per account: Personal, or the Team/Enterprise org name
 CLAUDE_PLANS=()
 CLAUDE_ROWSETS=()     # per account: one limit per line: label, used%, reset epoch, elapsed%
@@ -701,6 +710,9 @@ claude_fetch_account() {
   note="$(sanitize_error "$email")"
   [[ -n "$fetched" ]] && note="${note:+${note} · }fetched at $(date -r "$fetched" '+%-d %b %H:%M')"
   [[ -n "$asof" ]] && note="${note:+${note} · }cached from ${asof}"
+  local id="${service#Claude Code-credentials-}"
+  [[ "$id" == "$service" ]] && id="default"
+  CLAUDE_IDS+=("$id")
   CLAUDE_NAMES+=("$(sanitize_error "$name")")
   CLAUDE_PLANS+=("$plan")
   CLAUDE_ROWSETS+=("$rows")
@@ -719,7 +731,7 @@ claude_fetch() {
 }
 
 claude_export() {
-  declare -p CLAUDE_STATE CLAUDE_NAMES CLAUDE_PLANS CLAUDE_ROWSETS CLAUDE_WARNINGS CLAUDE_NOTES
+  declare -p CLAUDE_STATE CLAUDE_IDS CLAUDE_NAMES CLAUDE_PLANS CLAUDE_ROWSETS CLAUDE_WARNINGS CLAUDE_NOTES
 }
 
 claude_postprocess() { :; }
@@ -732,19 +744,23 @@ claude_has_data() {
   done
   return 1
 }
+# An account id narrows the rows to that one account, as a Codex window does.
 claude_rows() {
   claude_has_data || return 1
-  local rows
-  for rows in "${CLAUDE_ROWSETS[@]}"; do
-    [[ -n "$rows" ]] && printf '%s\n' "$rows"
+  local i found=1
+  for i in "${!CLAUDE_ROWSETS[@]}"; do
+    [[ -n "${1:-}" && "${CLAUDE_IDS[i]}" != "$1" ]] && continue
+    [[ -n "${CLAUDE_ROWSETS[i]}" ]] && { printf '%s\n' "${CLAUDE_ROWSETS[i]}"; found=0; }
   done
+  return "$found"
 }
 # With two accounts, "Claude Weekly over pace" wouldn't say which plan is
 # burning, so the account name joins the status.
 claude_update_header() {
-  local i name
+  local selector="${1:-}" i name
   for i in "${!CLAUDE_NAMES[@]}"; do
     [[ -z "${CLAUDE_ROWSETS[i]}" ]] && continue
+    [[ -n "$selector" && "${CLAUDE_IDS[i]}" != "$selector" ]] && continue
     name="$(claude_label)"
     (( ${#CLAUDE_NAMES[@]} > 1 )) && name+=" ${CLAUDE_NAMES[i]}"
     update_header_from_rows "$name" "${CLAUDE_ROWSETS[i]}"
@@ -761,6 +777,38 @@ claude_render() {
     [[ -n "${CLAUDE_ROWSETS[i]}" ]] && print_quota_rows "${CLAUDE_ROWSETS[i]}"
     [[ -n "${CLAUDE_WARNINGS[i]}" ]] && echo "${CLAUDE_WARNINGS[i]} | size=11 color=${ORANGE}"
     [[ -n "${CLAUDE_NOTES[i]}" ]] && echo "${CLAUDE_NOTES[i]} | size=11 color=${SECONDARY_COLOR}"
+  done
+}
+
+claude_account_name() {
+  local i
+  for i in "${!CLAUDE_IDS[@]}"; do
+    [[ "${CLAUDE_IDS[i]}" == "$1" ]] && { echo "${CLAUDE_NAMES[i]}"; return 0; }
+  done
+  return 1
+}
+
+# The locale switch keeps a non-ASCII organization name's first letter whole.
+first_letter() {
+  local LC_ALL=en_US.UTF-8
+  printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]'
+}
+
+# Every account's busiest quota side by side, "P 40% · A 62%" for the menu bar
+# or with full names for its tooltip.
+claude_each_title() {
+  local style="$1" i name used parts=()
+  for i in "${!CLAUDE_NAMES[@]}"; do
+    [[ -z "${CLAUDE_ROWSETS[i]}" ]] && continue
+    used="$(max_used_pct <<< "${CLAUDE_ROWSETS[i]}")"
+    name="${CLAUDE_NAMES[i]}"
+    [[ "$style" == "initials" ]] && name="$(first_letter "$name")"
+    parts+=("${name} ${used}%")
+  done
+  (( ${#parts[@]} > 0 )) || return 0
+  printf '%s' "${parts[0]}"
+  for i in "${parts[@]:1}"; do
+    printf ' · %s' "$i"
   done
 }
 
@@ -813,12 +861,14 @@ menubar_source_params() {
 # Items keep their names here: a settings menu of three bare logos would make
 # you decode the marks before you could choose between them.
 print_menubar_source_menu() {
-  local provider label selected
+  local provider label selected i
   case "$MENUBAR_SOURCE" in
     auto) selected="Busiest quota" ;;
     codex) selected="Codex · busiest limit" ;;
     codex-5-hours) selected="Codex · 5 hours" ;;
     codex-weekly) selected="Codex · weekly" ;;
+    claude-each) selected="Claude · each account" ;;
+    claude-*) selected="Claude · $(claude_account_name "$MENUBAR_SELECTOR" || echo "signed out")" ;;
     *) selected="$(provider_call "$MENUBAR_PROVIDER" label)" ;;
   esac
   echo "Indicator: ${selected} | sfimage=menubar.rectangle"
@@ -830,6 +880,12 @@ print_menubar_source_menu() {
       echo "--${label} · busiest limit | $(menubar_source_params codex) templateImage=$(provider_call "$provider" logo) tooltip=\"Automatically follows the highest Codex usage\""
       provider_call "$provider" rows "5 hours" >/dev/null && echo "--${label} · 5 hours | $(menubar_source_params codex-5-hours) templateImage=$(provider_call "$provider" logo)"
       provider_call "$provider" rows "Weekly" >/dev/null && echo "--${label} · weekly | $(menubar_source_params codex-weekly) templateImage=$(provider_call "$provider" logo)"
+    elif [[ "$provider" == "claude" && ${#CLAUDE_IDS[@]} -gt 1 ]]; then
+      echo "--${label} · busiest account | $(menubar_source_params claude) templateImage=$(provider_call "$provider" logo) tooltip=\"Automatically follows the highest usage across Claude accounts\""
+      echo "--${label} · each account | $(menubar_source_params claude-each) templateImage=$(provider_call "$provider" logo) tooltip=\"Shows every account's busiest quota side by side\""
+      for i in "${!CLAUDE_IDS[@]}"; do
+        echo "--${label} · ${CLAUDE_NAMES[i]} | $(menubar_source_params "claude-${CLAUDE_IDS[i]}") templateImage=$(provider_call "$provider" logo)"
+      done
     else
       echo "--${label} | $(menubar_source_params "$provider") templateImage=$(provider_call "$provider" logo)"
     fi
@@ -1166,15 +1222,20 @@ fi
 
 MENUBAR_SOURCE="$(read_menubar_source)"
 MENUBAR_PROVIDER=""
-MENUBAR_CODEX_LIMIT=""
+MENUBAR_SELECTOR=""
 case "$MENUBAR_SOURCE" in
   codex-5-hours)
     MENUBAR_PROVIDER="codex"
-    MENUBAR_CODEX_LIMIT="5 hours"
+    MENUBAR_SELECTOR="5 hours"
     ;;
   codex-weekly)
     MENUBAR_PROVIDER="codex"
-    MENUBAR_CODEX_LIMIT="Weekly"
+    MENUBAR_SELECTOR="Weekly"
+    ;;
+  claude-each) MENUBAR_PROVIDER="claude" ;;
+  claude-*)
+    MENUBAR_PROVIDER="claude"
+    MENUBAR_SELECTOR="${MENUBAR_SOURCE#claude-}"
     ;;
   auto) ;;
   *) MENUBAR_PROVIDER="$MENUBAR_SOURCE" ;;
@@ -1184,27 +1245,36 @@ esac
 # coloring it by another's pace would be a lie. The dropdown header, computed
 # second, still speaks for every provider — worst pace wins and names its
 # quota in text so the alert doesn't rely on color alone.
-compute_header "$MENUBAR_PROVIDER" "$MENUBAR_CODEX_LIMIT"
+compute_header "$MENUBAR_PROVIDER" "$MENUBAR_SELECTOR"
 TITLE_COLOR="$HEADER_COLOR"
 TITLE_STATUS="$HEADER_STATUS"
 TITLE_OFFLINE_ICON="$HEADER_ICON"
 [[ -n "$MENUBAR_PROVIDER" ]] && compute_header ""
 
-# Menu bar percent: the selected Codex window when one is pinned, otherwise
-# the busiest quota of the pinned provider or of every provider in "auto".
+# Menu bar percent: the selected Codex window or Claude account when one is
+# pinned, otherwise the busiest quota of the pinned provider or of every
+# provider in "auto".
 PERCENT_TITLE="$({
   for provider in "${PROVIDERS[@]}"; do
     [[ -n "$MENUBAR_PROVIDER" && "$provider" != "$MENUBAR_PROVIDER" ]] && continue
-    provider_call "$provider" has_data && provider_call "$provider" rows "$MENUBAR_CODEX_LIMIT"
+    provider_call "$provider" has_data && provider_call "$provider" rows "$MENUBAR_SELECTOR"
   done
-} | awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
-  END { if (seen) printf "%.0f", max }')"
+} | max_used_pct)"
+TITLE_VALUE=""
+[[ -n "$PERCENT_TITLE" ]] && TITLE_VALUE="${PERCENT_TITLE}%"
+TITLE_DETAIL="${TITLE_VALUE} used"
+if [[ "$MENUBAR_SOURCE" == "claude-each" ]]; then
+  TITLE_VALUE="$(claude_each_title initials)"
+  TITLE_DETAIL="$(claude_each_title names) used"
+fi
 
 # A pinned percentage needs to say which tool it came from. The mark does that
 # in the menu bar; the name still carries the tooltip and the text fallback.
 TITLE_NAME=""
 if [[ -n "$MENUBAR_PROVIDER" ]]; then
   TITLE_NAME="$(provider_call "$MENUBAR_PROVIDER" label) "
+  [[ "$MENUBAR_PROVIDER" == "claude" && -n "$MENUBAR_SELECTOR" && ${#CLAUDE_IDS[@]} -gt 1 ]] && \
+    TITLE_NAME+="$(claude_account_name "$MENUBAR_SELECTOR") "
   # Row-level statuses lead with the provider name, which the title already
   # carries: "Codex · Codex 5 hours over pace" reads as a stutter.
   TITLE_STATUS="${TITLE_STATUS#"$TITLE_NAME"}"
@@ -1234,10 +1304,10 @@ else
   TITLE_PARAMS+=" sfimage=${TITLE_ICON}"
 fi
 TITLE_TOOLTIP="Ration · ${TITLE_NAME}${TITLE_STATUS}"
-[[ -n "$PERCENT_TITLE" ]] && TITLE_TOOLTIP="Ration · ${TITLE_NAME}${PERCENT_TITLE}% used · ${TITLE_STATUS}"
+[[ -n "$TITLE_VALUE" ]] && TITLE_TOOLTIP="Ration · ${TITLE_NAME}${TITLE_DETAIL} · ${TITLE_STATUS}"
 TITLE_PARAMS+=" tooltip=\"${TITLE_TOOLTIP}\""
-if [[ -n "$PERCENT_TITLE" ]]; then
-  echo "${TITLE_LABEL}${PERCENT_TITLE}% | ${TITLE_PARAMS}"
+if [[ -n "$TITLE_VALUE" ]]; then
+  echo "${TITLE_LABEL}${TITLE_VALUE} | ${TITLE_PARAMS}"
 else
   echo "${TITLE_LABEL}? | ${TITLE_PARAMS}"
 fi

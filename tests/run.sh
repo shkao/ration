@@ -872,6 +872,59 @@ run_plugin
 expect_contains "25% | size=12.5"
 expect_contains "param2=auto terminal=false refresh=true checked=true"
 
+seed_two_claude_accounts() {
+  seed_personal_claude
+  seed_claude_account "Claude Code-credentials-1a2b3c4d" tok-work team default_claude_team \
+    me@acme.example "Acme Corp" "$(claude_usage_json 95 20)"
+}
+
+begin "picker offers each Claude account when two are signed in"
+seed_two_claude_accounts
+run_plugin
+expect_contains "--Claude · busiest account | bash="
+expect_contains "--Claude · each account | bash="
+expect_contains "--Claude · Personal | bash="
+expect_contains "--Claude · Acme Corp | bash="
+expect_contains "param2=claude-default terminal=false"
+expect_contains "param2=claude-1a2b3c4d terminal=false"
+expect_contains "param2=claude-each terminal=false"
+
+begin "a single Claude account keeps one picker entry"
+seed_personal_claude
+run_plugin
+expect_contains "--Claude | bash="
+expect_not_contains "param2=claude-each"
+expect_not_contains "param2=claude-default"
+
+begin "pinning one Claude account shows only its quota"
+seed_two_claude_accounts
+pin_menubar_source claude-default
+run_plugin
+# Acme's 95% is busier, but Personal is pinned, so its 60% wins the title.
+expect_contains "60% | size=12.5"
+expect_contains 'tooltip="Ration · Claude Personal 60% used · '
+expect_contains "Indicator: Claude · Personal |"
+expect_contains "param2=claude-default terminal=false refresh=true checked=true"
+# The dropdown still reports both accounts.
+expect_contains "Acme Corp · Team | size=12"
+
+begin "showing each Claude account puts both numbers in the menu bar"
+seed_two_claude_accounts
+pin_menubar_source claude-each
+run_plugin
+expect_contains "P 60% · A 95% | size=12.5"
+expect_contains 'tooltip="Ration · Claude Personal 60% · Acme Corp 95% used · Acme Corp 5 hours burning fast"'
+expect_contains "Indicator: Claude · each account |"
+# Acme is burning, so the warning glyph takes the icon slot.
+expect_contains "sfimage=exclamationmark.triangle"
+
+begin "a pinned Claude account that signed out reports no quota data"
+seed_personal_claude
+pin_menubar_source claude-1a2b3c4d
+run_plugin
+expect_contains "Indicator: Claude · signed out |"
+expect_contains "? | size=12.5"
+
 set_providers() {
   mkdir -p "$FAKE_HOME/.config/ration"
   printf '%s\n' "$@" > "$FAKE_HOME/.config/ration/providers"

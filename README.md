@@ -19,11 +19,11 @@ Your employer hands you a fixed ration of AI requests: GitHub Copilot premium re
 
 ## What the menu bar tells you
 
-By default, the bar shows a gauge icon and one number: how much of your busiest quota you've used. Pin a provider, or a Codex window, to show that selection instead. Open it for one bar per quota, each with its reset date.
+By default, the bar shows a gauge icon and one number: how much of your busiest quota you've used. Pin a provider, a Codex window, or a Claude account (or all of them side by side) to show that selection instead. Open it for one bar per quota, each with its reset date.
 
 Every bar has a tick (`│`). The tick is your fair share for right now, where usage would sit if you spread it evenly to reset day. Fill behind the tick means you're on pace. Fill past it means you're burning faster than the clock, and the menu bar number warms from green to orange to red. At the worst state the gauge swaps to a warning triangle, so trouble reads without relying on color. Hit 100% and Ration stops pacing and counts down instead: see you on reset day.
 
-Watching one tool in particular? **Indicator** in the dropdown pins the bar to a single provider. The gauge is then replaced by that product's mark, so the number reads as its own without spelling out a name, and the color follows that provider's pace alone. Choose Codex’s busiest limit, 5-hour limit, or weekly limit directly from the same list. The parent menu names your current selection, and a checkmark marks it in the list. The warning triangle still takes the icon slot at the worst state, where it brings the name back with it. The choice is saved in `~/.config/ration/menubar-source`; pick **Busiest quota** to go back to the default.
+Watching one tool in particular? **Indicator** in the dropdown pins the bar to a single provider. The gauge is then replaced by that product's mark, so the number reads as its own without spelling out a name, and the color follows that provider's pace alone. Choose Codex’s busiest limit, 5-hour limit, or weekly limit directly from the same list. With more than one Claude account signed in, pick the busiest account, a single account, or **each account**, which puts every account's busiest quota side by side under its initial (`P 40% · A 62%`; the tooltip spells out the names). The parent menu names your current selection, and a checkmark marks it in the list. The warning triangle still takes the icon slot at the worst state, where it brings the name back with it. The choice is saved in `~/.config/ration/menubar-source`; pick **Busiest quota** to go back to the default.
 
 ## Install
 
@@ -100,7 +100,7 @@ It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cac
 - `/copilot_internal/user` is undocumented and could change without notice.
 - Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
 - Codex usage updates only after Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
-- A Codex or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
+- A Codex, Claude, or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
 - `/api/oauth/usage` is undocumented and could change without notice. An account you haven't used in Claude Code for a while shows cached numbers until Claude Code refreshes its sign-in.
 - The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.
 
