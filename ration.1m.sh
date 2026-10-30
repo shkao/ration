@@ -59,11 +59,10 @@ CACHE_FILE="${CACHE_DIR}/quota.json"
 CODEX_HOME="${HOME}/.codex"
 CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
 
-# Which quota drives the menu bar number: "auto" (busiest across providers), a
-# provider id, a Codex window id, or a Claude account id, so a pinned tool
-# stays readable without opening the dropdown. Kept outside the cache dir, so
-# clearing caches doesn't reset it; the README's uninstall step removes it
-# explicitly.
+# Which quota drives the menu bar number: "auto" (busiest across providers) or
+# "<provider>[-<scope>][:<limit>]", so a pinned tool stays readable without
+# opening the dropdown. Kept outside the cache dir, so clearing caches doesn't
+# reset it; the README's uninstall step removes it explicitly.
 CONFIG_DIR="${HOME}/.config/ration"
 MENUBAR_SOURCE_FILE="${CONFIG_DIR}/menubar-source"
 
@@ -92,19 +91,16 @@ fi
 # Provider contract: <id>_{fetch,export,postprocess,label,logo,has_data,rows,
 # update_header,render,takeover,settings,present,welcome}. Main orchestration
 # dispatches only through these hooks; source-specific behavior stays private.
+# rows and update_header take an optional selector, "<scope>:<limit>" (see
+# parse_menubar_source). Claude's account scopes are the one source-specific
+# choice the picker and the menu bar title still spell out themselves.
 provider_call() {
   local provider="$1" hook="$2"
   shift 2
   "${provider}_${hook}" "$@"
 }
 
-provider_any_data() {
-  local provider
-  for provider in "${PROVIDERS[@]}"; do
-    provider_call "$provider" has_data && return 0
-  done
-  return 1
-}
+provider_any_data() { provider_any_data_except ""; }
 
 provider_any_data_except() {
   local excluded="$1" provider
@@ -123,21 +119,34 @@ provider_any_present() {
   return 1
 }
 
+# Decode the stored choice once into MENUBAR_PROVIDER, MENUBAR_SCOPE (a Claude
+# account id or "each") and MENUBAR_LIMIT (a limit slug), and the selector the
+# rows and update_header hooks take: "<scope>:<limit>", or empty for all rows.
 # An unreadable or stale file (a provider that no longer exists) falls back to
 # "auto" rather than pinning the menu bar to a source that can never report.
-read_menubar_source() {
-  local value="auto" provider owner
+parse_menubar_source() {
+  local value="auto" head provider
   [[ -s "$MENUBAR_SOURCE_FILE" ]] && value="$(sed -n '1p' "$MENUBAR_SOURCE_FILE" 2>/dev/null)"
+  # Codex windows had ids of their own before every limit got a slug.
   case "$value" in
-    auto) echo "$value"; return ;;
-    codex-5-hours|codex-weekly) owner="codex" ;;
-    claude-*) owner="claude" ;;
-    *) owner="$value" ;;
+    codex-5-hours) value="codex:5-hours" ;;
+    codex-weekly) value="codex:weekly" ;;
   esac
+  MENUBAR_SOURCE="auto"
+  MENUBAR_PROVIDER=""
+  MENUBAR_SCOPE=""
+  MENUBAR_LIMIT=""
+  MENUBAR_SELECTOR=""
+  head="${value%%:*}"
   for provider in "${PROVIDERS[@]}"; do
-    [[ "$provider" == "$owner" ]] && { echo "$value"; return; }
+    [[ "$provider" == "${head%%-*}" ]] || continue
+    MENUBAR_SOURCE="$value"
+    MENUBAR_PROVIDER="$provider"
+    [[ "$head" == *-* ]] && MENUBAR_SCOPE="${head#*-}"
+    [[ "$value" == *:* ]] && MENUBAR_LIMIT="${value#*:}"
+    [[ -n "${MENUBAR_SCOPE}${MENUBAR_LIMIT}" ]] && MENUBAR_SELECTOR="${MENUBAR_SCOPE}:${MENUBAR_LIMIT}"
+    return 0
   done
-  echo "auto"
 }
 
 # macOS has no `timeout`; without one a stalled network call would hang the
@@ -208,6 +217,11 @@ usage_bar() {
   }'
 }
 
+# "30 Oct 15:18": now, or the time $1 (an epoch or a file's mtime) names.
+stamp() {
+  date ${1:+-r "$1"} '+%-d %b %H:%M'
+}
+
 format_reset() {
   local reset_epoch="$1"
   if [[ -z "$reset_epoch" || "$reset_epoch" == "null" ]]; then
@@ -221,7 +235,7 @@ format_reset() {
   if [[ "$reset_day" == "$today_day" ]]; then
     date -r "$reset_epoch" "+%H:%M" 2>/dev/null
   else
-    date -r "$reset_epoch" "+%-d %b %H:%M" 2>/dev/null
+    stamp "$reset_epoch" 2>/dev/null
   fi
 }
 
@@ -297,15 +311,34 @@ update_header_from_rows() {
   done <<< "$rows"
 }
 
-# Roll pace up into the HEADER_* globals. $1 limits the roll-up to a single
-# provider (empty = all of them), and $2 optionally limits Codex to one window.
-# That is how a pinned menu bar reports only the quota it names.
 # Highest used% across TSV quota rows on stdin, rounded; nothing when empty.
 max_used_pct() {
   awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
     END { if (seen) printf "%.0f", max }'
 }
 
+# A stored choice names a limit by its label's slug ("5 hours" -> "5-hours"),
+# safe as a click parameter. Every awk below shares this one rule, so the
+# picker's values and the row filter can't drift apart.
+readonly SLUG_AWK='function slug(s) { s = tolower(s); gsub(/ /, "-", s); return s }'
+
+# Rows ($1) narrowed to the limit a selector ($2, "<scope>:<limit>") names; all
+# of them without one. Fails when nothing is left, so a pin to a limit that is
+# gone reports no quota data instead of another limit's number.
+selected_rows() {
+  local limit="${2#*:}" rows="$1"
+  [[ -n "$limit" ]] && rows="$(awk -F'\t' -v wanted="$limit" "${SLUG_AWK}"' slug($1) == wanted' <<< "$1")"
+  [[ -n "$rows" ]] && printf '%s\n' "$rows"
+}
+
+# "<slug><TAB><label>" for each distinct limit in the rows on stdin, in order.
+limit_choices() {
+  awk -F'\t' "${SLUG_AWK}"' $1 != "" && !seen[$1]++ { print slug($1) "\t" $1 }'
+}
+
+# Roll pace up into the HEADER_* globals. $1 limits the roll-up to a single
+# provider (empty = all of them), and $2 optionally to one account or limit.
+# That is how a pinned menu bar reports only the quota it names.
 compute_header() {
   local only="$1" selector="${2:-}" provider
   HEADER_COLOR="$GREEN"
@@ -313,18 +346,10 @@ compute_header() {
   HEADER_ICON=""
   for provider in "${PROVIDERS[@]}"; do
     [[ -n "$only" && "$provider" != "$only" ]] && continue
-    if [[ -n "$selector" ]]; then
-      provider_call "$provider" update_header "$selector"
-    else
-      provider_call "$provider" update_header
-    fi
+    provider_call "$provider" update_header "$selector"
   done
   if [[ -n "$only" ]]; then
-    if [[ -n "$selector" ]]; then
-      provider_call "$only" rows "$selector" >/dev/null && return 0
-    elif provider_call "$only" has_data; then
-      return 0
-    fi
+    provider_call "$only" rows "$selector" >/dev/null && return 0
   else
     # Plural wording only earns its place when more than Copilot reports.
     if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]] && \
@@ -386,14 +411,14 @@ antigravity_fetch() {
   [[ -n "$json" ]] && parsed="$(parse_antigravity <<< "$json")"
   if [[ -n "$parsed" ]]; then
     write_cache "$agy_cache" "$json"
-    AGY_FETCHED="$(date '+%-d %b %H:%M')"
+    AGY_FETCHED="$(stamp)"
   elif [[ -s "$agy_cache" ]]; then
     parsed="$(parse_antigravity < "$agy_cache")"
     if [[ -z "$parsed" ]]; then
       AGY_STATE="error"
       return 0
     fi
-    AGY_ASOF="$(date -r "$agy_cache" "+%-d %b %H:%M")"
+    AGY_ASOF="$(stamp "$agy_cache")"
   else
     AGY_STATE="error"
     return 0
@@ -413,9 +438,10 @@ antigravity_postprocess() { :; }
 antigravity_label() { echo "Antigravity"; }
 antigravity_logo() { echo "$LOGO_ANTIGRAVITY"; }
 antigravity_has_data() { [[ "$AGY_STATE" == "ok" ]]; }
-antigravity_rows() { antigravity_has_data && printf '%s\n' "$AGY_ROWS"; }
+antigravity_rows() { antigravity_has_data && selected_rows "$AGY_ROWS" "${1:-}"; }
 antigravity_update_header() {
-  antigravity_has_data && update_header_from_rows "$(antigravity_label)" "$AGY_ROWS"
+  local rows
+  rows="$(antigravity_rows "${1:-}")" && update_header_from_rows "$(antigravity_label)" "$rows"
 }
 
 antigravity_render() {
@@ -544,20 +570,10 @@ codex_postprocess() { :; }
 codex_label() { echo "Codex"; }
 codex_logo() { echo "$LOGO_CODEX"; }
 codex_has_data() { [[ "$CODEX_STATE" == "ok" ]]; }
-codex_rows() {
-  codex_has_data || return 1
-  if [[ -z "${1:-}" ]]; then
-    printf '%s\n' "$CODEX_ROWS"
-  else
-    awk -F '\t' -v wanted="$1" '$1 == wanted { print; found = 1 } END { exit !found }' <<< "$CODEX_ROWS"
-  fi
-}
+codex_rows() { codex_has_data && selected_rows "$CODEX_ROWS" "${1:-}"; }
 codex_update_header() {
-  local selector="${1:-}" rows="$CODEX_ROWS"
-  if [[ -n "$selector" ]]; then
-    rows="$(codex_rows "$selector")"
-  fi
-  [[ -n "$rows" ]] && update_header_from_rows "$(codex_label)" "$rows"
+  local rows
+  rows="$(codex_rows "${1:-}")" && update_header_from_rows "$(codex_label)" "$rows"
 }
 
 codex_render() {
@@ -570,7 +586,7 @@ codex_render() {
     if (plan == "") print "ChatGPT"
     else print "ChatGPT " toupper(substr(plan, 1, 1)) substr(plan, 2)
   }')"
-  echo "${plan_display} · local Codex snapshot from $(date -r "$CODEX_ASOF" '+%-d %b %H:%M') | size=11 color=${SECONDARY_COLOR}"
+  echo "${plan_display} · local Codex snapshot from $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
   echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
 }
 
@@ -695,7 +711,7 @@ claude_fetch_account() {
 
   if [[ -z "$json" && -s "$cache" ]]; then
     json="$(cat "$cache")"
-    asof="$(date -r "$mtime" '+%-d %b %H:%M')"
+    asof="$(stamp "$mtime")"
   fi
   # shellcheck disable=SC2016
   [[ -z "$json" ]] && json="$("$JQ_BIN" -cn --arg subscription "$subscription" --arg tier "$tier" \
@@ -708,7 +724,7 @@ claude_fetch_account() {
   [[ "$(wc -l <<< "$parsed")" -gt 3 ]] && rows="$(sed '1,3d' <<< "$parsed")"
   [[ -z "$rows" && -z "$warning" ]] && warning="Unexpected response from the Claude usage API"
   note="$(sanitize_error "$email")"
-  [[ -n "$fetched" ]] && note="${note:+${note} · }fetched at $(date -r "$fetched" '+%-d %b %H:%M')"
+  [[ -n "$fetched" ]] && note="${note:+${note} · }fetched at $(stamp "$fetched")"
   [[ -n "$asof" ]] && note="${note:+${note} · }cached from ${asof}"
   local id="${service#Claude Code-credentials-}"
   [[ "$id" == "$service" ]] && id="default"
@@ -744,26 +760,29 @@ claude_has_data() {
   done
   return 1
 }
-# An account id narrows the rows to that one account, as a Codex window does.
+# Account i's rows under a selector ($2): its scope is an account id, or empty
+# or "each" for every account. An account without the limit reports nothing.
+claude_account_rows() {
+  local i="$1" scope="${2%%:*}"
+  [[ -n "$scope" && "$scope" != "each" && "${CLAUDE_IDS[i]}" != "$scope" ]] && return 1
+  [[ -n "${CLAUDE_ROWSETS[i]}" ]] && selected_rows "${CLAUDE_ROWSETS[i]}" "$2"
+}
 claude_rows() {
-  claude_has_data || return 1
   local i found=1
   for i in "${!CLAUDE_ROWSETS[@]}"; do
-    [[ -n "${1:-}" && "${CLAUDE_IDS[i]}" != "$1" ]] && continue
-    [[ -n "${CLAUDE_ROWSETS[i]}" ]] && { printf '%s\n' "${CLAUDE_ROWSETS[i]}"; found=0; }
+    claude_account_rows "$i" "${1:-}" && found=0
   done
   return "$found"
 }
 # With two accounts, "Claude Weekly over pace" wouldn't say which plan is
 # burning, so the account name joins the status.
 claude_update_header() {
-  local selector="${1:-}" i name
+  local i name rows
   for i in "${!CLAUDE_NAMES[@]}"; do
-    [[ -z "${CLAUDE_ROWSETS[i]}" ]] && continue
-    [[ -n "$selector" && "${CLAUDE_IDS[i]}" != "$selector" ]] && continue
+    rows="$(claude_account_rows "$i" "${1:-}")" || continue
     name="$(claude_label)"
     (( ${#CLAUDE_NAMES[@]} > 1 )) && name+=" ${CLAUDE_NAMES[i]}"
-    update_header_from_rows "$name" "${CLAUDE_ROWSETS[i]}"
+    update_header_from_rows "$name" "$rows"
   done
 }
 
@@ -795,12 +814,14 @@ first_letter() {
 }
 
 # Every account's busiest quota side by side, "P 40% · A 62%" for the menu bar
-# or with full names for its tooltip.
+# or with full names for its tooltip. A selector with a limit ($2) compares that
+# one limit instead, and an account without it drops out rather than show
+# another limit.
 claude_each_title() {
-  local style="$1" i name used parts=()
+  local style="$1" i name rows used parts=()
   for i in "${!CLAUDE_NAMES[@]}"; do
-    [[ -z "${CLAUDE_ROWSETS[i]}" ]] && continue
-    used="$(max_used_pct <<< "${CLAUDE_ROWSETS[i]}")"
+    rows="$(claude_account_rows "$i" "${2:-}")" || continue
+    used="$(max_used_pct <<< "$rows")"
     name="${CLAUDE_NAMES[i]}"
     [[ "$style" == "initials" ]] && name="$(first_letter "$name")"
     parts+=("${name} ${used}%")
@@ -856,39 +877,68 @@ menubar_source_params() {
   echo "$params"
 }
 
+# "Claude · each account · Weekly": the tool, then its account and limit.
+menubar_source_name() {
+  local name slug label label_found
+  [[ -z "$MENUBAR_PROVIDER" ]] && { echo "Busiest quota"; return; }
+  name="$(provider_call "$MENUBAR_PROVIDER" label)"
+  case "$MENUBAR_SCOPE" in
+    "") ;;
+    each) name+=" · each account" ;;
+    *) name+=" · $(claude_account_name "$MENUBAR_SCOPE" || echo "signed out")" ;;
+  esac
+  [[ -z "$MENUBAR_LIMIT" ]] && { echo "$name"; return; }
+  # A limit nothing reports any more still reads as words, not as a slug.
+  label="${MENUBAR_LIMIT//-/ }"
+  while IFS=$'\t' read -r slug label_found; do
+    [[ "$slug" == "$MENUBAR_LIMIT" ]] && label="$label_found"
+  done <<< "$(provider_call "$MENUBAR_PROVIDER" rows | limit_choices)"
+  echo "${name} · ${label}"
+}
+
 # Only providers that are set up are offered, plus whichever one is pinned, so
 # the current choice always shows its checkmark even after a provider drops out.
-# Items keep their names here: a settings menu of three bare logos would make
-# you decode the marks before you could choose between them.
+# A tool with several choices gets its own section under a dimmed name, so each
+# row only says what differs ("5 hours", "Personal") instead of repeating the
+# tool and its logo. A tool with one choice is a single named row.
+#
+# Which account and which limit are separate questions, so each gets its own
+# group with its own checkmark, and a click in one keeps the other's answer:
+# every row's value is the current choice with only its own half swapped.
 print_menubar_source_menu() {
-  local provider label selected i
-  case "$MENUBAR_SOURCE" in
-    auto) selected="Busiest quota" ;;
-    codex) selected="Codex · busiest limit" ;;
-    codex-5-hours) selected="Codex · 5 hours" ;;
-    codex-weekly) selected="Codex · weekly" ;;
-    claude-each) selected="Claude · each account" ;;
-    claude-*) selected="Claude · $(claude_account_name "$MENUBAR_SELECTOR" || echo "signed out")" ;;
-    *) selected="$(provider_call "$MENUBAR_PROVIDER" label)" ;;
-  esac
-  echo "Indicator: ${selected} | sfimage=menubar.rectangle"
-  echo "--Busiest quota | $(menubar_source_params auto) tooltip=\"Automatically follows the highest usage across all providers\" sfimage=gauge"
+  local provider label choices scope limit slug i
+  echo "Indicator: $(menubar_source_name) | sfimage=menubar.rectangle"
+  echo "--Busiest quota | $(menubar_source_params auto) tooltip=\"Automatically follows the highest usage across all providers\""
   for provider in "${PROVIDERS[@]}"; do
     [[ "$provider" == "$MENUBAR_PROVIDER" ]] || provider_call "$provider" present || continue
     label="$(provider_call "$provider" label)"
-    if [[ "$provider" == "codex" ]]; then
-      echo "--${label} · busiest limit | $(menubar_source_params codex) templateImage=$(provider_call "$provider" logo) tooltip=\"Automatically follows the highest Codex usage\""
-      provider_call "$provider" rows "5 hours" >/dev/null && echo "--${label} · 5 hours | $(menubar_source_params codex-5-hours) templateImage=$(provider_call "$provider" logo)"
-      provider_call "$provider" rows "Weekly" >/dev/null && echo "--${label} · weekly | $(menubar_source_params codex-weekly) templateImage=$(provider_call "$provider" logo)"
-    elif [[ "$provider" == "claude" && ${#CLAUDE_IDS[@]} -gt 1 ]]; then
-      echo "--${label} · busiest account | $(menubar_source_params claude) templateImage=$(provider_call "$provider" logo) tooltip=\"Automatically follows the highest usage across Claude accounts\""
-      echo "--${label} · each account | $(menubar_source_params claude-each) templateImage=$(provider_call "$provider" logo) tooltip=\"Shows every account's busiest quota side by side\""
-      for i in "${!CLAUDE_IDS[@]}"; do
-        echo "--${label} · ${CLAUDE_NAMES[i]} | $(menubar_source_params "claude-${CLAUDE_IDS[i]}") templateImage=$(provider_call "$provider" logo)"
-      done
-    else
-      echo "--${label} | $(menubar_source_params "$provider") templateImage=$(provider_call "$provider" logo)"
+    choices="$(provider_call "$provider" rows | limit_choices)"
+    scope=""
+    limit=""
+    if [[ "$provider" == "$MENUBAR_PROVIDER" ]]; then
+      scope="${MENUBAR_SCOPE:+-${MENUBAR_SCOPE}}"
+      limit="${MENUBAR_LIMIT:+:${MENUBAR_LIMIT}}"
     fi
+    echo "-----"
+    if [[ "$provider" == "claude" ]] && (( ${#CLAUDE_IDS[@]} > 1 )); then
+      echo "--${label} | size=12"
+      echo "--Busiest account | $(menubar_source_params "claude${limit}") tooltip=\"Automatically follows the busiest Claude account\""
+      echo "--Each account | $(menubar_source_params "claude-each${limit}") tooltip=\"Shows every account side by side\""
+      for i in "${!CLAUDE_IDS[@]}"; do
+        echo "--${CLAUDE_NAMES[i]} | $(menubar_source_params "claude-${CLAUDE_IDS[i]}${limit}")"
+      done
+      [[ -n "$choices" ]] && echo "--Limit | size=12"
+    elif [[ "$choices" == *$'\n'* || -n "$limit" ]]; then
+      echo "--${label} | size=12"
+    else
+      echo "--${label} | $(menubar_source_params "$provider")"
+      continue
+    fi
+    [[ -z "$choices" ]] && continue
+    echo "--Busiest limit | $(menubar_source_params "${provider}${scope}") tooltip=\"Automatically follows the highest ${label} limit\""
+    while IFS=$'\t' read -r slug label; do
+      echo "--${label} | $(menubar_source_params "${provider}${scope}:${slug}")"
+    done <<< "$choices"
   done
 }
 
@@ -964,7 +1014,7 @@ copilot_fetch() {
       # Network trouble (offline, DNS, GitHub down): render the last good
       # snapshot instead of an error; the cache mtime is when it was fetched.
       RESPONSE="$(cat "$CACHE_FILE")"
-      OFFLINE_ASOF="$(date -r "$CACHE_FILE" "+%-d %b %H:%M")"
+      OFFLINE_ASOF="$(stamp "$CACHE_FILE")"
       CP_STATE="offline"
     else
       CP_STATE="unreachable"
@@ -973,7 +1023,7 @@ copilot_fetch() {
     fi
   else
     CP_STATE="ok"
-    CP_FETCHED="$(date '+%-d %b %H:%M')"
+    CP_FETCHED="$(stamp)"
   fi
 }
 
@@ -1039,7 +1089,6 @@ if [[ -n "$OFFLINE_ASOF" && -n "$EPOCH_END" ]] && (( EPOCH_END <= EPOCH_NOW )); 
   ELAPSED_PCT=""
 fi
 
-PERCENT_TITLE="$(printf '%.0f' "$ACTUAL_USED_PCT")"
 # format_reset always yields text ("unknown" when the epoch is unparsable).
 RESET_DISPLAY="$(format_reset "$EPOCH_END")"
 
@@ -1220,26 +1269,7 @@ if ! provider_any_present; then
   exit 0
 fi
 
-MENUBAR_SOURCE="$(read_menubar_source)"
-MENUBAR_PROVIDER=""
-MENUBAR_SELECTOR=""
-case "$MENUBAR_SOURCE" in
-  codex-5-hours)
-    MENUBAR_PROVIDER="codex"
-    MENUBAR_SELECTOR="5 hours"
-    ;;
-  codex-weekly)
-    MENUBAR_PROVIDER="codex"
-    MENUBAR_SELECTOR="Weekly"
-    ;;
-  claude-each) MENUBAR_PROVIDER="claude" ;;
-  claude-*)
-    MENUBAR_PROVIDER="claude"
-    MENUBAR_SELECTOR="${MENUBAR_SOURCE#claude-}"
-    ;;
-  auto) ;;
-  *) MENUBAR_PROVIDER="$MENUBAR_SOURCE" ;;
-esac
+parse_menubar_source
 
 # A pinned source owns the menu bar alone: naming one tool up there while
 # coloring it by another's pace would be a lie. The dropdown header, computed
@@ -1251,21 +1281,20 @@ TITLE_STATUS="$HEADER_STATUS"
 TITLE_OFFLINE_ICON="$HEADER_ICON"
 [[ -n "$MENUBAR_PROVIDER" ]] && compute_header ""
 
-# Menu bar percent: the selected Codex window or Claude account when one is
-# pinned, otherwise the busiest quota of the pinned provider or of every
+# Menu bar percent: the selected account or limit when one is pinned, otherwise the busiest quota of the pinned provider or of every
 # provider in "auto".
 PERCENT_TITLE="$({
   for provider in "${PROVIDERS[@]}"; do
     [[ -n "$MENUBAR_PROVIDER" && "$provider" != "$MENUBAR_PROVIDER" ]] && continue
-    provider_call "$provider" has_data && provider_call "$provider" rows "$MENUBAR_SELECTOR"
+    provider_call "$provider" rows "$MENUBAR_SELECTOR"
   done
 } | max_used_pct)"
 TITLE_VALUE=""
 [[ -n "$PERCENT_TITLE" ]] && TITLE_VALUE="${PERCENT_TITLE}%"
 TITLE_DETAIL="${TITLE_VALUE} used"
-if [[ "$MENUBAR_SOURCE" == "claude-each" ]]; then
-  TITLE_VALUE="$(claude_each_title initials)"
-  TITLE_DETAIL="$(claude_each_title names) used"
+if [[ "$MENUBAR_PROVIDER" == "claude" && "$MENUBAR_SCOPE" == "each" ]]; then
+  TITLE_VALUE="$(claude_each_title initials "$MENUBAR_SELECTOR")"
+  TITLE_DETAIL="$(claude_each_title names "$MENUBAR_SELECTOR") used"
 fi
 
 # A pinned percentage needs to say which tool it came from. The mark does that
@@ -1273,8 +1302,8 @@ fi
 TITLE_NAME=""
 if [[ -n "$MENUBAR_PROVIDER" ]]; then
   TITLE_NAME="$(provider_call "$MENUBAR_PROVIDER" label) "
-  [[ "$MENUBAR_PROVIDER" == "claude" && -n "$MENUBAR_SELECTOR" && ${#CLAUDE_IDS[@]} -gt 1 ]] && \
-    TITLE_NAME+="$(claude_account_name "$MENUBAR_SELECTOR") "
+  [[ "$MENUBAR_PROVIDER" == "claude" && -n "$MENUBAR_SCOPE" && "$MENUBAR_SCOPE" != "each" && \
+     ${#CLAUDE_IDS[@]} -gt 1 ]] && TITLE_NAME+="$(claude_account_name "$MENUBAR_SCOPE") "
   # Row-level statuses lead with the provider name, which the title already
   # carries: "Codex · Codex 5 hours over pace" reads as a stutter.
   TITLE_STATUS="${TITLE_STATUS#"$TITLE_NAME"}"

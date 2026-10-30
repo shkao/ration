@@ -233,21 +233,13 @@ seed_codex_snapshot() {
   codex_jsonl > "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
 }
 
+# $1 is the plan type; an empty one leaves the field out of the snapshot.
 seed_codex_weekly_only_snapshot() {
-  local weekly_reset
+  local plan="${1-plus}" weekly_reset
   weekly_reset="$(( $(date +%s) + 302400 ))"
   mkdir -p "$FAKE_HOME/.codex/sessions/2026/08/01"
   printf '%s\n' \
-    "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":2.0,\"window_minutes\":10080,\"resets_at\":${weekly_reset}},\"secondary\":null,\"plan_type\":\"plus\"}}}" \
-    > "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
-}
-
-seed_codex_snapshot_without_plan() {
-  local weekly_reset
-  weekly_reset="$(( $(date +%s) + 302400 ))"
-  mkdir -p "$FAKE_HOME/.codex/sessions/2026/08/01"
-  printf '%s\n' \
-    "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":2.0,\"window_minutes\":10080,\"resets_at\":${weekly_reset}},\"secondary\":null}}}" \
+    "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"rate_limits\":{\"limit_id\":\"codex\",\"primary\":{\"used_percent\":2.0,\"window_minutes\":10080,\"resets_at\":${weekly_reset}},\"secondary\":null${plan:+,\"plan_type\":\"${plan}\"}}}}" \
     > "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
 }
 
@@ -290,6 +282,11 @@ seed_claude_account() {
 seed_personal_claude() {
   seed_claude_account "Claude Code-credentials" tok-personal max default_claude_max_5x \
     me@example.com "Octo Cat" "$@"
+}
+
+seed_acme_claude() {
+  seed_claude_account "Claude Code-credentials-1a2b3c4d" tok-work team default_claude_team \
+    me@acme.example "Acme Corp" "${1:-$(claude_usage_json 95 20)}"
 }
 
 seed_copilot_cache() {
@@ -613,7 +610,7 @@ expect_not_contains "5 hours:"
 
 begin "codex snapshot without a plan keeps its quota fields aligned"
 GH_STUB=""
-seed_codex_snapshot_without_plan
+seed_codex_weekly_only_snapshot ""
 run_plugin
 expect_contains "Weekly:"
 expect_contains "  2% used"
@@ -679,8 +676,7 @@ expect_check "token reached the cache" sh -c "! grep -rq tok-personal '$FAKE_HOM
 
 begin "claude shows each signed-in account and names the one off pace"
 seed_personal_claude "$(claude_usage_json 10 5)"
-seed_claude_account "Claude Code-credentials-1a2b3c4d" tok-work team default_claude_team \
-  me@acme.example "Acme Corp" "$(claude_usage_json 95 20)"
+seed_acme_claude
 run_plugin
 expect_contains "Personal · Max 5x | size=12"
 expect_contains "Acme Corp · Team | size=12"
@@ -695,7 +691,7 @@ mkdir -p "$FAKE_HOME/keychain"
 printf '{}\n' > "$FAKE_HOME/keychain/Claude Safe Storage"
 run_plugin
 expect_not_contains "Claude Safe Storage"
-expect_check "a non-credential item was read as an account" test "$(grep -c '| size=12$' <<< "$OUTPUT")" -eq 1
+expect_check "a non-credential item was read as an account" test "$(grep -c '^[^-].*| size=12$' <<< "$OUTPUT")" -eq 1
 
 begin "claude asks at most once per interval"
 seed_personal_claude
@@ -756,15 +752,19 @@ seed_codex_snapshot
 run_plugin
 expect_contains "Indicator: Busiest quota |"
 expect_contains "--Busiest quota | bash="
-expect_contains "--Codex · busiest limit |"
-expect_contains "--Codex · 5 hours |"
-expect_contains "--Codex · weekly |"
+expect_contains "--Codex | size=12"
+expect_contains "--Busiest limit |"
+expect_contains "--5 hours |"
+expect_contains "--Weekly |"
+# Each tool sits in its own section instead of repeating its name per row.
+expect_contains "-----"
+expect_not_contains "--Codex · "
 expect_not_contains "---5 hours"
 expect_not_contains "---Weekly"
 expect_contains "param1=--set-menubar-source param2=copilot"
 expect_contains "param1=--set-menubar-source param2=codex"
-expect_contains "param1=--set-menubar-source param2=codex-5-hours"
-expect_contains "param1=--set-menubar-source param2=codex-weekly"
+expect_contains "param1=--set-menubar-source param2=codex:5-hours"
+expect_contains "param1=--set-menubar-source param2=codex:weekly"
 # Antigravity isn't set up here, so pinning to it would be a dead choice.
 expect_not_contains "param2=antigravity"
 # The default sits on "auto", and clicks must not open a terminal window.
@@ -783,7 +783,7 @@ expect_contains "60% | size=12.5 templateImage="
 expect_not_contains "Codex 60% |"
 expect_not_contains "sfimage=gauge tooltip="
 expect_contains 'tooltip="Ration · Codex 60% used · 5 hours slightly over pace"'
-expect_contains "param2=codex terminal=false refresh=true checked=true templateImage="
+expect_contains "param2=codex terminal=false refresh=true checked=true tooltip="
 # The dropdown header still reports across every provider.
 expect_contains "● Codex 5 hours slightly over pace"
 expect_contains "**Copilot**"
@@ -791,31 +791,43 @@ expect_contains "**Copilot**"
 begin "selecting the Codex five-hour limit drives the menu bar"
 make_gh_ok
 seed_codex_snapshot
-OUTPUT="$(env HOME="$FAKE_HOME" RATION_JQ="$JQ" "$PLUGIN" --set-menubar-source codex-5-hours 2>/dev/null)"
+pin_menubar_source codex:5-hours
 run_plugin
 expect_contains "60% | size=12.5 templateImage="
 expect_contains 'tooltip="Ration · Codex 60% used · 5 hours slightly over pace"'
-expect_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+expect_contains "param2=codex:5-hours terminal=false refresh=true checked=true"
 expect_contains "Indicator: Codex · 5 hours |"
-expect_not_contains "param2=codex-weekly terminal=false refresh=true checked=true"
+expect_not_contains "param2=codex:weekly terminal=false refresh=true checked=true"
 
-begin "selecting the Codex weekly limit drives the menu bar"
+begin "a Codex window saved under its old id still drives the menu bar"
 make_gh_ok
 seed_codex_snapshot
-OUTPUT="$(env HOME="$FAKE_HOME" RATION_JQ="$JQ" "$PLUGIN" --set-menubar-source codex-weekly 2>/dev/null)"
+pin_menubar_source codex-weekly
 run_plugin
 expect_contains "25% | size=12.5 templateImage="
 expect_contains 'tooltip="Ration · Codex 25% used · On pace"'
-expect_contains "param2=codex-weekly terminal=false refresh=true checked=true"
-expect_contains "Indicator: Codex · weekly |"
-expect_not_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+expect_contains "param2=codex:weekly terminal=false refresh=true checked=true"
+expect_contains "Indicator: Codex · Weekly |"
+expect_not_contains "param2=codex:5-hours terminal=false refresh=true checked=true"
 
-begin "Codex picker only offers windows in the current snapshot"
+begin "Codex with a single window keeps one picker entry"
 GH_STUB=""
 seed_codex_weekly_only_snapshot
 run_plugin
-expect_contains "param2=codex-weekly terminal=false refresh=true"
-expect_not_contains "param2=codex-5-hours terminal=false refresh=true"
+expect_contains "--Codex | bash="
+expect_not_contains "param2=codex:5-hours"
+expect_not_contains "param2=codex:weekly"
+
+begin "Antigravity limits can be pinned like any other tool's"
+GH_STUB=""
+make_agy "cat <<'JSON'
+$(agy_json)
+JSON"
+pin_menubar_source antigravity:gemini
+run_plugin
+expect_contains "Indicator: Antigravity · Gemini |"
+expect_contains "--Antigravity | size=12"
+expect_contains "param2=antigravity:gemini terminal=false refresh=true checked=true"
 
 begin "a missing pinned Codex window reports no quota data"
 GH_STUB=""
@@ -824,7 +836,7 @@ pin_menubar_source codex-5-hours
 run_plugin
 expect_contains "? | size=12.5"
 expect_contains "tooltip=\"Ration · Codex No quota data\""
-expect_not_contains "param2=codex-5-hours terminal=false refresh=true checked=true"
+expect_not_contains "param2=codex:5-hours terminal=false refresh=true checked=true"
 
 begin "pinned provider colors the menu bar by its own pace, not the worst"
 make_gh_ok 5 50
@@ -874,27 +886,38 @@ expect_contains "param2=auto terminal=false refresh=true checked=true"
 
 seed_two_claude_accounts() {
   seed_personal_claude
-  seed_claude_account "Claude Code-credentials-1a2b3c4d" tok-work team default_claude_team \
-    me@acme.example "Acme Corp" "$(claude_usage_json 95 20)"
+  seed_acme_claude
 }
 
 begin "picker offers each Claude account when two are signed in"
 seed_two_claude_accounts
 run_plugin
-expect_contains "--Claude · busiest account | bash="
-expect_contains "--Claude · each account | bash="
-expect_contains "--Claude · Personal | bash="
-expect_contains "--Claude · Acme Corp | bash="
+expect_contains "--Claude | size=12"
+expect_contains "--Busiest account | bash="
+expect_contains "--Each account | bash="
+expect_contains "--Personal | bash="
+expect_contains "--Acme Corp | bash="
 expect_contains "param2=claude-default terminal=false"
 expect_contains "param2=claude-1a2b3c4d terminal=false"
 expect_contains "param2=claude-each terminal=false"
 
-begin "a single Claude account keeps one picker entry"
+begin "a single Claude account offers only its limits"
 seed_personal_claude
 run_plugin
-expect_contains "--Claude | bash="
+expect_contains "--Claude | size=12"
+expect_contains "--Busiest limit | bash="
+expect_contains "--5 hours | bash="
+expect_contains "param2=claude:5-hours terminal=false"
+expect_contains "param2=claude:weekly terminal=false"
+expect_not_contains "--Limit | size=12"
 expect_not_contains "param2=claude-each"
 expect_not_contains "param2=claude-default"
+
+begin "a single Claude account without data keeps one picker entry"
+seed_claude_account "Claude Code-credentials" tok-personal max default_claude_max_5x \
+  me@example.com "" "{}"
+run_plugin
+expect_contains "--Claude | bash="
 
 begin "pinning one Claude account shows only its quota"
 seed_two_claude_accounts
@@ -917,6 +940,41 @@ expect_contains 'tooltip="Ration · Claude Personal 60% · Acme Corp 95% used ·
 expect_contains "Indicator: Claude · each account |"
 # Acme is burning, so the warning glyph takes the icon slot.
 expect_contains "sfimage=exclamationmark.triangle"
+
+begin "the account and limit choices each keep their own checkmark"
+seed_personal_claude "$(claude_usage_json 60 30)"
+seed_acme_claude
+pin_menubar_source claude-each:weekly
+run_plugin
+expect_contains "--Limit | size=12"
+expect_contains "param2=claude-each:weekly terminal=false refresh=true checked=true"
+# Each account row keeps the chosen limit; each limit row keeps the account.
+expect_contains "param2=claude-default:weekly terminal=false"
+expect_contains "param2=claude-each:5-hours terminal=false"
+expect_contains "param2=claude-each terminal=false"
+expect_check "more than the account and limit rows were checked" \
+  test "$(grep -c 'checked=true' <<< "$OUTPUT")" -eq 2
+expect_contains "Indicator: Claude · each account · Weekly |"
+# Personal is at 30% weekly and Acme at 20%, not their busiest 60% and 95%.
+expect_contains "P 30% · A 20% | size=12.5"
+
+begin "one account on one limit shows only that number"
+seed_two_claude_accounts
+pin_menubar_source claude-1a2b3c4d:5-hours
+run_plugin
+expect_contains "Indicator: Claude · Acme Corp · 5 hours |"
+expect_contains "95% | size=12.5"
+expect_contains "param2=claude-1a2b3c4d:5-hours terminal=false refresh=true checked=true"
+
+begin "an account without the chosen limit drops out of the side-by-side view"
+seed_personal_claude
+seed_acme_claude "$(claude_usage_json 95 20 | "$JQ" -c 'del(.limits)')"
+pin_menubar_source claude-each:fable
+run_plugin
+expect_contains "Indicator: Claude · each account · Fable |"
+# Personal reports Fable at 10%; Acme has no Fable limit, so it isn't shown.
+expect_contains "P 10% | size=12.5"
+expect_not_contains "A 95%"
 
 begin "a pinned Claude account that signed out reports no quota data"
 seed_personal_claude
