@@ -700,11 +700,12 @@ run_plugin
 expect_check "second refresh called the API again" test "$(grep -c '/usage' "$FAKE_HOME/curl-argv")" -eq 1
 expect_contains "60% used"
 
-begin "an expired Claude token skips the API and says how to refresh"
+begin "an expired Claude usage token does not report a sign-in failure"
 EXPIRES_MS=1000 seed_personal_claude
 run_plugin
 expect_contains "Personal · Max 5x | size=12"
-expect_contains "Sign-in expired · open Claude Code to refresh"
+expect_contains "Usage token expired · run /usage in this account's Claude Code"
+expect_not_contains "Sign-in expired"
 expect_check "expired token was sent anyway" test ! -e "$FAKE_HOME/curl-argv"
 
 begin "a rejected Claude token falls back to the cached limits"
@@ -718,8 +719,26 @@ touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude.json"
 printf '{"error": "unauthorized"}\n401\n' > "$FAKE_HOME/claude-api/tok-personal/usage"
 run_plugin
 expect_contains "40% used"
-expect_contains "Sign-in expired · open Claude Code to refresh"
+expect_contains "Usage token rejected · run /usage in this account's Claude Code"
+expect_not_contains "Sign-in expired"
 expect_contains "me@example.com · cached from"
+
+begin "an expired work token keeps cached usage beside a live personal account"
+seed_personal_claude "$(claude_usage_json 10 5)"
+seed_acme_claude
+run_plugin
+# Expire only the work token and age its cache past the polling interval.
+EXPIRES_MS=1000 seed_acme_claude
+touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude-1a2b3c4d.json"
+run_plugin
+expect_contains "Personal · Max 5x | size=12"
+expect_contains "me@example.com · fetched at"
+expect_contains "Acme Corp · Team | size=12"
+expect_contains "95% used"
+expect_contains "me@acme.example · cached from"
+expect_contains "Usage token expired · run /usage in this account's Claude Code"
+expect_not_contains "Sign-in expired"
+expect_check "expired work token reached the API again" test "$(grep -c '/usage' "$FAKE_HOME/curl-argv")" -eq 2
 
 begin "a rate-limited Claude API without a cache explains itself"
 seed_personal_claude '{"error": "rate_limited"}' 429

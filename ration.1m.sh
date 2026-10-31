@@ -676,7 +676,7 @@ claude_fetch_account() {
     json="$(cat "$cache")"
     fetched="$mtime"
   elif [[ -z "$token" || "$token" == "-" ]] || (( ${expires:-0} / 1000 <= now )); then
-    warning="Sign-in expired · open Claude Code to refresh"
+    warning="Usage token expired · run /usage in this account's Claude Code"
   else
     CLAUDE_TOKEN="$token"
     response="$(run_with_timeout claude_request usage 2>/dev/null)"
@@ -700,7 +700,7 @@ claude_fetch_account() {
         warning="Unexpected response from the Claude usage API"
       fi
     elif [[ "$status" == "401" ]]; then
-      warning="Sign-in expired · open Claude Code to refresh"
+      warning="Usage token rejected · run /usage in this account's Claude Code"
     elif [[ "$status" =~ ^[0-9]{3}$ && "$status" != "000" ]]; then
       warning="Claude usage API answered HTTP ${status}"
     else
