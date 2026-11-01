@@ -13,7 +13,7 @@ Your employer hands you a fixed ration of AI requests: GitHub Copilot premium re
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/ration-dark.png">
-    <img src="assets/ration-light.png" alt="Ration's menu bar dropdown with Copilot, Codex, and Antigravity quota bars, reset times, and an overall pace status" width="330">
+    <img src="assets/ration-light.png" alt="Ration's menu bar dropdown with Copilot, Codex, Claude, and Antigravity quota bars, reset times, and an overall pace status" width="330">
   </picture>
 </p>
 
