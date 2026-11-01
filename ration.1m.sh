@@ -597,11 +597,8 @@ codex_render() {
   echo "---"
   echo "**Codex** | md=true size=13"
   print_quota_rows "$CODEX_ROWS"
-  local plan_display
-  plan_display="$(awk -v plan="$CODEX_PLAN" 'BEGIN {
-    if (plan == "") print "ChatGPT"
-    else print "ChatGPT " toupper(substr(plan, 1, 1)) substr(plan, 2)
-  }')"
+  local plan_display="ChatGPT"
+  [[ -n "$CODEX_PLAN" ]] && plan_display+=" $(first_letter "$CODEX_PLAN")${CODEX_PLAN:1}"
   echo "${plan_display} · local Codex snapshot from $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
   echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
 }
