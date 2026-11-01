@@ -1006,6 +1006,18 @@ expect_contains "templateImage="
 expect_contains 'tooltip="Ration · Claude Personal 30% · Acme Corp 20% used · '
 expect_contains "Indicator: All providers · Weekly |"
 
+begin "Team and Enterprise accounts sharing an icon show their names"
+seed_personal_claude "$(claude_usage_json 60 30)"
+seed_acme_claude
+seed_claude_account "Claude Code-credentials-5e6f7a8b" tok-globex enterprise \
+  default_claude_enterprise me@globex.example "Globex" "$(claude_usage_json 40 10)"
+pin_menubar_source all:weekly
+run_plugin
+expect_contains ":person.crop.circle:30 Acme Corp20 Globex10% | size=12.5"
+touch "$FAKE_HOME/.config/ration/split-indicators"
+run_plugin RATION_SPLIT_ROLE=claude
+expect_contains ":person.crop.circle:30% · Acme Corp20% · Globex10% | size=12.5"
+
 begin "showing each Claude account puts both numbers in the menu bar"
 seed_two_claude_accounts
 pin_menubar_source claude-each

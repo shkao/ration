@@ -827,6 +827,25 @@ first_letter() {
   printf '%s' "${1:0:1}" | tr '[:lower:]' '[:upper:]'
 }
 
+# Account i's menu bar icon by plan class, or its name when another account
+# would show the same icon.
+claude_plan_symbol() {
+  local i="$1" j symbols=()
+  for j in "${!CLAUDE_PLANS[@]}"; do
+    case "${CLAUDE_PLANS[j]}" in
+      Team|Enterprise) symbols[j]=":building.2.crop.circle:" ;;
+      *) symbols[j]=":person.crop.circle:" ;;
+    esac
+  done
+  for j in "${!symbols[@]}"; do
+    if [[ "$j" != "$i" && "${symbols[j]}" == "${symbols[i]}" ]]; then
+      echo "${CLAUDE_NAMES[i]}"
+      return
+    fi
+  done
+  echo "${symbols[i]}"
+}
+
 # Every account's busiest quota side by side, "P 40% · A 62%" for the menu bar
 # or with full names for its tooltip. A selector with a limit ($2) compares that
 # one limit instead, and an account without it drops out rather than show
@@ -839,10 +858,7 @@ claude_each_title() {
     name="${CLAUDE_NAMES[i]}"
     [[ "$style" == "initials" ]] && name="$(first_letter "$name")"
     if [[ "$style" == "symbols" ]]; then
-      case "${CLAUDE_PLANS[i]}" in
-        Team|Enterprise) name=":building.2.crop.circle:" ;;
-        *) name=":person.crop.circle:" ;;
-      esac
+      name="$(claude_plan_symbol "$i")"
       parts+=("${name}${used}%")
     else
       parts+=("${name} ${used}%")
@@ -869,7 +885,7 @@ claude_welcome() {
 
 # Show the busiest limit for each provider and each Claude account.
 all_providers_title() {
-  local style="$1" provider rows used label i j name separator="" claude_separator
+  local style="$1" provider rows used label i name separator="" claude_separator
   for provider in "${PROVIDERS[@]}"; do
     if [[ "$provider" == "claude" ]]; then
       claude_separator="${separator}:sun.max.fill: "
@@ -878,16 +894,7 @@ all_providers_title() {
         used="$(max_used_pct <<< "$rows")"
         name="${CLAUDE_NAMES[i]}"
         if [[ "$style" == "compact" ]]; then
-          case "${CLAUDE_PLANS[i]}" in
-            Team|Enterprise) name=":building.2.crop.circle:" ;;
-            *) name=":person.crop.circle:" ;;
-          esac
-          for j in "${!CLAUDE_NAMES[@]}"; do
-            if [[ "$j" != "$i" && "${CLAUDE_PLANS[j]}" == "${CLAUDE_PLANS[i]}" ]]; then
-              name="${CLAUDE_NAMES[i]}"
-              break
-            fi
-          done
+          name="$(claude_plan_symbol "$i")"
           printf '%s%s%s' "$claude_separator" "$name" "$used"
           claude_separator=" "
         else
