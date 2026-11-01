@@ -833,7 +833,7 @@ claude_plan_symbol() {
   local i="$1" j symbols=()
   for j in "${!CLAUDE_PLANS[@]}"; do
     case "${CLAUDE_PLANS[j]}" in
-      Team|Enterprise) symbols[j]=":building.2.crop.circle:" ;;
+      Team*|Enterprise*) symbols[j]=":building.2.crop.circle:" ;;
       *) symbols[j]=":person.crop.circle:" ;;
     esac
   done

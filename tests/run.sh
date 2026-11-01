@@ -1018,6 +1018,15 @@ touch "$FAKE_HOME/.config/ration/split-indicators"
 run_plugin RATION_SPLIT_ROLE=claude
 expect_contains ":person.crop.circle:30% · Acme Corp20% · Globex10% | size=12.5"
 
+begin "a Team plan with a tier suffix keeps the building icon"
+seed_personal_claude "$(claude_usage_json 60 30)"
+seed_claude_account "Claude Code-credentials-1a2b3c4d" tok-work team \
+  default_claude_team_5x me@acme.example "Acme Corp" "$(claude_usage_json 95 20)"
+pin_menubar_source all:weekly
+run_plugin
+expect_contains "Acme Corp · Team 5x | size=12"
+expect_contains ":person.crop.circle:30 :building.2.crop.circle:20% | size=12.5"
+
 begin "two personal accounts keep their icons when names can't tell them apart"
 seed_personal_claude "$(claude_usage_json 60 30)"
 seed_claude_account "Claude Code-credentials-9f8e7d6c" tok-pro pro \
