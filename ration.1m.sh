@@ -59,7 +59,8 @@ CACHE_FILE="${CACHE_DIR}/quota.json"
 CODEX_HOME="${HOME}/.codex"
 CODEX_CACHE_FILE="${CACHE_DIR}/codex.tsv"
 
-# Which quota drives the menu bar number: "auto" (busiest across providers) or
+# Which quota drives the menu bar number: "auto" (busiest across providers),
+# "all[:<limit>]" (every provider side by side) or
 # "<provider>[-<scope>][:<limit>]", so a pinned tool stays readable without
 # opening the dropdown. Kept outside the cache dir, so clearing caches doesn't
 # reset it; the README's uninstall step removes it explicitly.
