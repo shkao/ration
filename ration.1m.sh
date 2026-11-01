@@ -269,20 +269,27 @@ print_quota_rows() {
   done <<< "$rows"
 }
 
-# Same thresholds as the Copilot menu bar status: color by how far usage
-# runs ahead of the time already elapsed in the quota window.
+# Same thresholds as the Copilot menu bar status: rank by how far usage
+# runs ahead of the time already elapsed in the quota window. 4 is an
+# exhausted quota, 3 to 0 match color_rank.
+pace_rank() {
+  awk -v u="$1" -v e="$2" 'BEGIN {
+    d = sprintf("%.4f", u - e) + 0
+    if (u + 0 > 99.999) print 4
+    else if (d > 30) print 3
+    else if (d > 15) print 2
+    else if (d > 5) print 1
+    else print 0
+  }'
+}
+
 pace_color() {
-  local used="$1" elapsed="$2" diff
-  if float_gt "$used" 99.999; then
-    echo "$RED"
-    return
-  fi
-  diff="$(awk -v u="$used" -v e="$elapsed" 'BEGIN { printf "%.4f", u - e }')"
-  if float_gt "$diff" 30; then echo "$RED"
-  elif float_gt "$diff" 15; then echo "$ORANGE"
-  elif float_gt "$diff" 5; then echo "$YELLOW"
-  else echo "$GREEN"
-  fi
+  case "$(pace_rank "$1" "$2")" in
+    4|3) echo "$RED" ;;
+    2) echo "$ORANGE" ;;
+    1) echo "$YELLOW" ;;
+    *) echo "$GREEN" ;;
+  esac
 }
 
 # Rank a status color by severity so the header can report the worst quota.
@@ -296,25 +303,20 @@ color_rank() {
 }
 
 update_header_from_rows() {
-  local provider="$1" rows="$2" label used elapsed quota_color quota_rank current_rank exhausted
+  local provider="$1" rows="$2" label used elapsed quota_rank current_rank
   while IFS=$'\t' read -r label used _ elapsed; do
     [[ -z "$label" ]] && continue
-    quota_color="$(pace_color "$used" "$elapsed")"
-    quota_rank="$(color_rank "$quota_color")"
+    quota_rank="$(pace_rank "$used" "$elapsed")"
     current_rank="$(color_rank "$HEADER_COLOR")"
-    exhausted=false
-    float_gt "$used" 99.999 && exhausted=true
-    if (( quota_rank > current_rank )) || [[ "$exhausted" == true && "$quota_rank" == "$current_rank" ]]; then
-      HEADER_COLOR="$quota_color"
-      if [[ "$exhausted" == true ]]; then
-        HEADER_STATUS="${provider} ${label} exhausted · see you on reset day"
-      else
-        case "$quota_rank" in
-          3) HEADER_STATUS="${provider} ${label} burning fast" ;;
-          2) HEADER_STATUS="${provider} ${label} over pace" ;;
-          1) HEADER_STATUS="${provider} ${label} slightly over pace" ;;
-        esac
-      fi
+    # An exhausted quota (rank 4) outranks every color, even another red.
+    if (( quota_rank > current_rank )); then
+      case "$quota_rank" in
+        4) HEADER_COLOR="$RED"
+          HEADER_STATUS="${provider} ${label} exhausted · see you on reset day" ;;
+        3) HEADER_COLOR="$RED"; HEADER_STATUS="${provider} ${label} burning fast" ;;
+        2) HEADER_COLOR="$ORANGE"; HEADER_STATUS="${provider} ${label} over pace" ;;
+        1) HEADER_COLOR="$YELLOW"; HEADER_STATUS="${provider} ${label} slightly over pace" ;;
+      esac
     fi
   done <<< "$rows"
 }
