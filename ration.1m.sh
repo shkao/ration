@@ -1399,15 +1399,6 @@ TITLE_OFFLINE_ICON="$HEADER_ICON"
 
 # Menu bar percent: the selected account or limit when one is pinned, otherwise the busiest quota of the pinned provider or of every
 # provider in "auto".
-PERCENT_TITLE="$({
-  for provider in "${PROVIDERS[@]}"; do
-    [[ -n "$MENUBAR_PROVIDER" && "$provider" != "$MENUBAR_PROVIDER" ]] && continue
-    provider_call "$provider" rows "$MENUBAR_SELECTOR"
-  done
-} | max_used_pct)"
-TITLE_VALUE=""
-[[ -n "$PERCENT_TITLE" ]] && TITLE_VALUE="${PERCENT_TITLE}%"
-TITLE_DETAIL="${TITLE_VALUE} used"
 ALL_CODEX_ICON="false"
 if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]]; then
   for provider in "${PROVIDERS[@]}"; do
@@ -1426,6 +1417,16 @@ elif [[ "$MENUBAR_PROVIDER" == "claude" && "$MENUBAR_SCOPE" == "each" ]]; then
     TITLE_VALUE="$(claude_each_title initials "$MENUBAR_SELECTOR")"
   fi
   TITLE_DETAIL="$(claude_each_title names "$MENUBAR_SELECTOR") used"
+else
+  PERCENT_TITLE="$({
+    for provider in "${PROVIDERS[@]}"; do
+      [[ -n "$MENUBAR_PROVIDER" && "$provider" != "$MENUBAR_PROVIDER" ]] && continue
+      provider_call "$provider" rows "$MENUBAR_SELECTOR"
+    done
+  } | max_used_pct)"
+  TITLE_VALUE=""
+  [[ -n "$PERCENT_TITLE" ]] && TITLE_VALUE="${PERCENT_TITLE}%"
+  TITLE_DETAIL="${TITLE_VALUE} used"
 fi
 
 # A pinned percentage needs to say which tool it came from. The mark does that
