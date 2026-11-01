@@ -737,7 +737,7 @@ claude_fetch_account() {
 
   local name plan email rows="" note
   { IFS= read -r name; IFS= read -r plan; IFS= read -r email; } <<< "$parsed"
-  [[ "$(wc -l <<< "$parsed")" -gt 3 ]] && rows="$(sed '1,3d' <<< "$parsed")"
+  rows="$(sed '1,3d' <<< "$parsed")"
   [[ -z "$rows" && -z "$warning" ]] && warning="Unexpected response from the Claude usage API"
   note="$(sanitize_error "$email")"
   [[ -n "$fetched" ]] && note="${note:+${note} · }fetched at $(stamp "$fetched")"
