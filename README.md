@@ -23,7 +23,7 @@ By default, the bar shows a gauge icon and one number: how much of your busiest 
 
 Every bar has a tick (`│`). The tick is your fair share for right now, where usage would sit if you spread it evenly to reset day. Fill behind the tick means you're on pace. Fill past it means you're burning faster than the clock, and the menu bar number warms from green to orange to red. At the worst state the gauge swaps to a warning triangle, so trouble reads without relying on color. Hit 100% and Ration stops pacing and counts down instead: see you on reset day.
 
-Watching one tool in particular? **Indicator** in the dropdown pins the bar to a single provider. The gauge is then replaced by that product's mark, so the number reads as its own without spelling out a name, and the color follows that provider's pace alone. A tool with more than one limit gets its own section: keep its **Busiest limit**, or pick one limit such as Codex’s 5-hour window or Claude’s weekly limit. With more than one Claude account signed in, a second group picks the busiest account, a single account, or **each account**, which puts every account's quota side by side under its initial (`P 40% · A 62%`; the tooltip spells out the names). The two groups combine, so **each account** with **Weekly** compares every account's weekly limit. The parent menu names your current selection, and a checkmark marks it in the list. The warning triangle still takes the icon slot at the worst state, where it brings the name back with it. The choice is saved in `~/.config/ration/menubar-source`; pick **Busiest quota** to go back to the default.
+Choose **All providers** in **Indicator** to show each provider side by side, with separate Claude accounts. The compact menu bar uses the Codex mark and symbols for Claude accounts. The dropdown explains the personal and team symbols, and the tooltip identifies each account. Choose **All providers · 5 hours** or **All providers · Weekly** to show the same window across accounts; providers without that window are omitted. The default shows each provider or account’s busiest reported limit. Watching one tool in particular? **Indicator** in the dropdown pins the bar to a single provider. The gauge is then replaced by that product's mark, so the number reads as its own without spelling out a name, and the color follows that provider's pace alone. A tool with more than one limit gets its own section: keep its **Busiest limit**, or pick one limit such as Codex’s 5-hour window or Claude’s weekly limit. With more than one Claude account signed in, a second group picks the busiest account, a single account, or **each account**, which puts every account's quota side by side under its initial (`P 40% · A 62%`; the tooltip spells out the names). The two groups combine, so **each account** with **Weekly** compares every account's weekly limit. The parent menu names your current selection, and a checkmark marks it in the list. The warning triangle still takes the icon slot at the worst state, where it brings the name back with it. The choice is saved in `~/.config/ration/menubar-source`; pick **Busiest quota** to go back to the default.
 
 ## Install
 
@@ -48,6 +48,22 @@ cd ration
 ```
 
 Then point SwiftBar at the plugin folder `install.sh` prints (Preferences > Plugins > Plugin Folder). The default is `~/.swiftbar-plugins`; set `SWIFTBAR_PLUGIN_DIR` when running the installer to choose another folder. Coming from QuotaPace? `install.sh` clears the old plugin first, so SwiftBar won't run both.
+
+### Separate Codex and Claude icons
+
+To show Claude as a separate menu bar item with its own logo, install the second
+plugin beside the first and enable the split layout:
+
+```bash
+cp ration-claude.1m.sh ~/.swiftbar-plugins/
+mkdir -p ~/.config/ration
+touch ~/.config/ration/split-indicators
+open -g 'swiftbar://refreshallplugins'
+```
+
+Use the actual plugin folder if it differs from the default. In an All providers
+view, both items follow its selected limit. Other providers remain in the first
+item. Select a different indicator to return to the single-item view.
 
 ### Reproducible setup
 
@@ -114,10 +130,10 @@ The suite runs the real plugin end to end against stub Copilot, Antigravity, Key
 
 ## Uninstall
 
-These commands use the default plugin folder. If you installed into a custom `SWIFTBAR_PLUGIN_DIR`, remove `ration.1m.sh` there instead.
+These commands use the default plugin folder. If you installed into a custom `SWIFTBAR_PLUGIN_DIR`, remove both plugin files there instead.
 
 ```bash
-rm ~/.swiftbar-plugins/ration.1m.sh
+rm -f ~/.swiftbar-plugins/ration.1m.sh ~/.swiftbar-plugins/ration-claude.1m.sh
 rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
 ```
 
@@ -125,7 +141,8 @@ rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
 <summary>Project layout</summary>
 
 ```
-ration.1m.sh              the plugin, everything in one file by design
+ration.1m.sh              the main plugin, self-contained
+ration-claude.1m.sh       optional second menu bar item
 helpers/ration-login.sh   "Sign in with GitHub…" recovery action
 install.sh                copies both files into place
 tests/run.sh              integration tests (provider fixtures, isolated $HOME)

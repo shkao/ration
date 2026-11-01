@@ -950,6 +950,62 @@ expect_contains "param2=claude-default terminal=false refresh=true checked=true"
 # The dropdown still reports both accounts.
 expect_contains "Acme Corp · Team | size=12"
 
+begin "all providers show their usage and separate Claude accounts"
+seed_two_claude_accounts
+seed_codex_snapshot
+pin_menubar_source all
+run_plugin
+expect_contains "Indicator: All providers |"
+expect_contains "param2=all terminal=false refresh=true checked=true"
+expect_contains ":sun.max.fill: Claude: :person.crop.circle: Personal · :building.2.crop.circle: Team/Enterprise"
+expect_contains "templateImage="
+expect_contains ":person.crop.circle:60 :building.2.crop.circle:95% | size=12.5"
+expect_contains 'tooltip="Ration · Codex 60% · Claude Personal 60% · Claude Acme Corp 95% used · '
+
+begin "all providers can show the weekly limit"
+seed_personal_claude "$(claude_usage_json 60 30)"
+seed_acme_claude
+seed_codex_snapshot
+pin_menubar_source all:weekly
+run_plugin
+expect_contains "Indicator: All providers · Weekly |"
+expect_contains "param2=all:weekly terminal=false refresh=true checked=true"
+expect_contains "param2=all:5-hours terminal=false refresh=true"
+expect_contains ":person.crop.circle:30 :building.2.crop.circle:20% | size=12.5"
+expect_contains 'tooltip="Ration · Codex 25% · Claude Personal 30% · Claude Acme Corp 20% used · weekly · '
+
+begin "all providers can show the five-hour limit"
+seed_two_claude_accounts
+seed_codex_snapshot
+pin_menubar_source all:5-hours
+run_plugin
+expect_contains "Indicator: All providers · 5 hours |"
+expect_contains "param2=all:5-hours terminal=false refresh=true checked=true"
+expect_contains ":person.crop.circle:60 :building.2.crop.circle:95% | size=12.5"
+
+begin "all-provider limit without matching data reports no quota data"
+seed_codex_snapshot
+pin_menubar_source all:fable
+run_plugin
+expect_contains 'tooltip="Ration · No quota data"'
+expect_contains "? | size=12.5"
+
+begin "split items show separate providers and share the weekly window"
+seed_personal_claude "$(claude_usage_json 60 30)"
+seed_acme_claude
+seed_codex_snapshot
+pin_menubar_source all:weekly
+touch "$FAKE_HOME/.config/ration/split-indicators"
+run_plugin
+expect_contains "25% | size=12.5 templateImage="
+expect_not_contains ":person.crop.circle:30 :building.2.crop.circle:20% |"
+expect_contains "Indicator: All providers · Weekly |"
+run_plugin RATION_SPLIT_ROLE=claude
+expect_contains ":person.crop.circle:30% · :building.2.crop.circle:20% | size=12.5"
+expect_contains "templateImage="
+expect_contains 'tooltip="Ration · Claude Personal 30% · Acme Corp 20% used · '
+expect_contains "Indicator: All providers · Weekly |"
+
 begin "showing each Claude account puts both numbers in the menu bar"
 seed_two_claude_accounts
 pin_menubar_source claude-each

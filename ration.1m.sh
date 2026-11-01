@@ -85,6 +85,7 @@ SELF="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
 if [[ "${1:-}" == "--set-menubar-source" ]]; then
   mkdir -p "$CONFIG_DIR" 2>/dev/null
   printf '%s\n' "${2:-auto}" > "$MENUBAR_SOURCE_FILE" 2>/dev/null
+  [[ -f "$CONFIG_DIR/split-indicators" ]] && open -g 'swiftbar://refreshallplugins' >/dev/null 2>&1
   exit 0
 fi
 
@@ -137,6 +138,12 @@ parse_menubar_source() {
   MENUBAR_SCOPE=""
   MENUBAR_LIMIT=""
   MENUBAR_SELECTOR=""
+  if [[ "$value" == "all" || "$value" == all:* ]]; then
+    MENUBAR_SOURCE="$value"
+    [[ "$value" == *:* ]] && MENUBAR_LIMIT="${value#*:}"
+    [[ -n "$MENUBAR_LIMIT" ]] && MENUBAR_SELECTOR=":${MENUBAR_LIMIT}"
+    return
+  fi
   head="${value%%:*}"
   for provider in "${PROVIDERS[@]}"; do
     [[ "$provider" == "${head%%-*}" ]] || continue
@@ -187,9 +194,10 @@ sanitize_error() {
 }
 
 write_cache() {
-  local path="$1" contents="$2"
+  local path="$1" contents="$2" temporary
   mkdir -p "$CACHE_DIR" 2>/dev/null
-  printf '%s\n' "$contents" > "${path}.tmp" 2>/dev/null && mv -f "${path}.tmp" "$path" 2>/dev/null
+  temporary="$(mktemp "${path}.XXXXXX")" || return 1
+  printf '%s\n' "$contents" > "$temporary" 2>/dev/null && mv -f "$temporary" "$path" 2>/dev/null
 }
 
 # Marker is "│" (U+2502), not ASCII "|": a literal pipe would start the
@@ -340,16 +348,22 @@ limit_choices() {
 # provider (empty = all of them), and $2 optionally to one account or limit.
 # That is how a pinned menu bar reports only the quota it names.
 compute_header() {
-  local only="$1" selector="${2:-}" provider
+  local only="$1" selector="${2:-}" provider selected_data=1
   HEADER_COLOR="$GREEN"
   HEADER_STATUS="On pace"
   HEADER_ICON=""
   for provider in "${PROVIDERS[@]}"; do
     [[ -n "$only" && "$provider" != "$only" ]] && continue
+    if [[ -n "$selector" ]]; then
+      provider_call "$provider" rows "$selector" >/dev/null || continue
+      selected_data=0
+    fi
     provider_call "$provider" update_header "$selector"
   done
   if [[ -n "$only" ]]; then
     provider_call "$only" rows "$selector" >/dev/null && return 0
+  elif [[ -n "$selector" ]]; then
+    (( selected_data == 0 )) && return 0
   else
     # Plural wording only earns its place when more than Copilot reports.
     if [[ "$HEADER_COLOR" == "$GREEN" && "$HEADER_STATUS" == "On pace" ]] && \
@@ -824,7 +838,15 @@ claude_each_title() {
     used="$(max_used_pct <<< "$rows")"
     name="${CLAUDE_NAMES[i]}"
     [[ "$style" == "initials" ]] && name="$(first_letter "$name")"
-    parts+=("${name} ${used}%")
+    if [[ "$style" == "symbols" ]]; then
+      case "${CLAUDE_PLANS[i]}" in
+        Team|Enterprise) name=":building.2.crop.circle:" ;;
+        *) name=":person.crop.circle:" ;;
+      esac
+      parts+=("${name}${used}%")
+    else
+      parts+=("${name} ${used}%")
+    fi
   done
   (( ${#parts[@]} > 0 )) || return 0
   printf '%s' "${parts[0]}"
@@ -843,6 +865,53 @@ claude_present() { [[ "$CLAUDE_STATE" != "absent" ]]; }
 claude_welcome() {
   echo "For Claude (Pro, Max, Team, or Enterprise plan): | size=12"
   echo "Sign in to Claude Code with /login | font=Menlo size=11 color=${SECONDARY_COLOR}"
+}
+
+# Show the busiest limit for each provider and each Claude account.
+all_providers_title() {
+  local style="$1" provider rows used label i j name separator="" claude_separator
+  for provider in "${PROVIDERS[@]}"; do
+    if [[ "$provider" == "claude" ]]; then
+      claude_separator="${separator}:sun.max.fill: "
+      for i in "${!CLAUDE_NAMES[@]}"; do
+        rows="$(claude_account_rows "$i" "$MENUBAR_SELECTOR")" || continue
+        used="$(max_used_pct <<< "$rows")"
+        name="${CLAUDE_NAMES[i]}"
+        if [[ "$style" == "compact" ]]; then
+          case "${CLAUDE_PLANS[i]}" in
+            Team|Enterprise) name=":building.2.crop.circle:" ;;
+            *) name=":person.crop.circle:" ;;
+          esac
+          for j in "${!CLAUDE_NAMES[@]}"; do
+            if [[ "$j" != "$i" && "${CLAUDE_PLANS[j]}" == "${CLAUDE_PLANS[i]}" ]]; then
+              name="${CLAUDE_NAMES[i]}"
+              break
+            fi
+          done
+          printf '%s%s%s' "$claude_separator" "$name" "$used"
+          claude_separator=" "
+        else
+          printf '%sClaude %s %s%%' "$separator" "$name" "$used"
+        fi
+        separator=" · "
+      done
+    else
+      rows="$(provider_call "$provider" rows "$MENUBAR_SELECTOR")" || continue
+      used="$(max_used_pct <<< "$rows")"
+      [[ -n "$used" ]] || continue
+      label="$(provider_call "$provider" label)"
+      if [[ "$style" == "compact" ]]; then
+        if [[ "$provider" == "codex" && "$ALL_CODEX_ICON" == "true" ]]; then
+          printf '%s%s' "$separator" "$used"
+        else
+          printf '%s%s %s' "$separator" "$label" "$used"
+        fi
+      else
+        printf '%s%s %s%%' "$separator" "$label" "$used"
+      fi
+      separator=" · "
+    fi
+  done
 }
 
 # Shared chrome for full-menu (takeover) screens: menu bar glyph, app header,
@@ -880,6 +949,18 @@ menubar_source_params() {
 # "Claude · each account · Weekly": the tool, then its account and limit.
 menubar_source_name() {
   local name slug label label_found
+  if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]]; then
+    if [[ -n "$MENUBAR_LIMIT" ]]; then
+      case "$MENUBAR_LIMIT" in
+        5-hours) echo "All providers · 5 hours" ;;
+        weekly) echo "All providers · Weekly" ;;
+        *) echo "All providers · ${MENUBAR_LIMIT//-/ }" ;;
+      esac
+    else
+      echo "All providers"
+    fi
+    return
+  fi
   [[ -z "$MENUBAR_PROVIDER" ]] && { echo "Busiest quota"; return; }
   name="$(provider_call "$MENUBAR_PROVIDER" label)"
   case "$MENUBAR_SCOPE" in
@@ -909,6 +990,11 @@ print_menubar_source_menu() {
   local provider label choices scope limit slug i
   echo "Indicator: $(menubar_source_name) | sfimage=menubar.rectangle"
   echo "--Busiest quota | $(menubar_source_params auto) tooltip=\"Automatically follows the highest usage across all providers\""
+  echo "--All providers | $(menubar_source_params all) tooltip=\"Shows each provider and Claude account side by side\""
+  if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]]; then
+    echo "--All providers · 5 hours | $(menubar_source_params all:5-hours) tooltip=\"Shows the 5-hour limit where available\""
+    echo "--All providers · Weekly | $(menubar_source_params all:weekly) tooltip=\"Shows the weekly limit where available\""
+  fi
   for provider in "${PROVIDERS[@]}"; do
     [[ "$provider" == "$MENUBAR_PROVIDER" ]] || provider_call "$provider" present || continue
     label="$(provider_call "$provider" label)"
@@ -1271,6 +1357,27 @@ fi
 
 parse_menubar_source
 
+# In the optional split layout, both items use the same all-provider window.
+SPLIT_ROLE=""
+if [[ -f "$CONFIG_DIR/split-indicators" && "$MENUBAR_SOURCE" == all* ]]; then
+  SPLIT_ROLE="${RATION_SPLIT_ROLE:-primary}"
+  ALL_PROVIDERS=("${PROVIDERS[@]}")
+  PROVIDERS=()
+  for provider in "${ALL_PROVIDERS[@]}"; do
+    if [[ "$SPLIT_ROLE" == "claude" && "$provider" == "claude" ]] || \
+       [[ "$SPLIT_ROLE" == "primary" && "$provider" != "claude" ]]; then
+      PROVIDERS+=("$provider")
+    fi
+  done
+  if [[ "$SPLIT_ROLE" == "claude" ]]; then
+    MENUBAR_PROVIDER="claude"
+    MENUBAR_SCOPE="each"
+    MENUBAR_SELECTOR="each:${MENUBAR_LIMIT}"
+  fi
+elif [[ "${RATION_SPLIT_ROLE:-}" == "claude" ]]; then
+  exit 0
+fi
+
 # A pinned source owns the menu bar alone: naming one tool up there while
 # coloring it by another's pace would be a lie. The dropdown header, computed
 # second, still speaks for every provider — worst pace wins and names its
@@ -1279,7 +1386,7 @@ compute_header "$MENUBAR_PROVIDER" "$MENUBAR_SELECTOR"
 TITLE_COLOR="$HEADER_COLOR"
 TITLE_STATUS="$HEADER_STATUS"
 TITLE_OFFLINE_ICON="$HEADER_ICON"
-[[ -n "$MENUBAR_PROVIDER" ]] && compute_header ""
+[[ -n "$MENUBAR_PROVIDER$MENUBAR_LIMIT" ]] && compute_header ""
 
 # Menu bar percent: the selected account or limit when one is pinned, otherwise the busiest quota of the pinned provider or of every
 # provider in "auto".
@@ -1292,8 +1399,23 @@ PERCENT_TITLE="$({
 TITLE_VALUE=""
 [[ -n "$PERCENT_TITLE" ]] && TITLE_VALUE="${PERCENT_TITLE}%"
 TITLE_DETAIL="${TITLE_VALUE} used"
-if [[ "$MENUBAR_PROVIDER" == "claude" && "$MENUBAR_SCOPE" == "each" ]]; then
-  TITLE_VALUE="$(claude_each_title initials "$MENUBAR_SELECTOR")"
+ALL_CODEX_ICON="false"
+if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]]; then
+  for provider in "${PROVIDERS[@]}"; do
+    provider_call "$provider" rows "$MENUBAR_SELECTOR" >/dev/null || continue
+    [[ "$provider" == "codex" ]] && ALL_CODEX_ICON="true"
+    break
+  done
+  TITLE_VALUE="$(all_providers_title compact)"
+  [[ -n "$TITLE_VALUE" ]] && TITLE_VALUE+="%"
+  TITLE_DETAIL="$(all_providers_title names) used"
+  [[ -n "$MENUBAR_LIMIT" ]] && TITLE_DETAIL+=" · ${MENUBAR_LIMIT//-/ }"
+elif [[ "$MENUBAR_PROVIDER" == "claude" && "$MENUBAR_SCOPE" == "each" ]]; then
+  if [[ "$SPLIT_ROLE" == "claude" ]]; then
+    TITLE_VALUE="$(claude_each_title symbols "$MENUBAR_SELECTOR")"
+  else
+    TITLE_VALUE="$(claude_each_title initials "$MENUBAR_SELECTOR")"
+  fi
   TITLE_DETAIL="$(claude_each_title names "$MENUBAR_SELECTOR") used"
 fi
 
@@ -1326,7 +1448,14 @@ TITLE_ICON="gauge"
 # out of the title. The warning and offline glyphs still win that slot: they
 # carry states the mark can't, and the name comes back to keep them readable.
 TITLE_LABEL="$TITLE_NAME"
-if [[ -n "$MENUBAR_PROVIDER" && "$TITLE_ICON" == "gauge" ]]; then
+if [[ "$SPLIT_ROLE" == "claude" ]]; then
+  TITLE_PARAMS+=" templateImage=$(claude_logo)"
+  TITLE_LABEL=""
+  [[ "$TITLE_ICON" != "gauge" ]] && TITLE_VALUE=":${TITLE_ICON}: ${TITLE_VALUE}"
+elif [[ "$ALL_CODEX_ICON" == "true" ]]; then
+  TITLE_PARAMS+=" templateImage=$(codex_logo)"
+  [[ "$TITLE_ICON" != "gauge" ]] && TITLE_VALUE=":${TITLE_ICON}: ${TITLE_VALUE}"
+elif [[ -n "$MENUBAR_PROVIDER" && "$TITLE_ICON" == "gauge" ]]; then
   TITLE_PARAMS+=" templateImage=$(provider_call "$MENUBAR_PROVIDER" logo)"
   TITLE_LABEL=""
 else
@@ -1340,9 +1469,21 @@ if [[ -n "$TITLE_VALUE" ]]; then
 else
   echo "${TITLE_LABEL}? | ${TITLE_PARAMS}"
 fi
+if [[ -n "$SPLIT_ROLE" ]]; then
+  PROVIDERS=("${ALL_PROVIDERS[@]}")
+  compute_header ""
+  MENUBAR_PROVIDER=""
+fi
 echo "---"
 echo "Ration | size=13"
 echo "● ${HEADER_STATUS} | color=${HEADER_COLOR} size=11"
+if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]] && claude_has_data; then
+  if [[ -n "$SPLIT_ROLE" ]]; then
+    echo "Claude: :person.crop.circle: Personal · :building.2.crop.circle: Team/Enterprise | size=11 color=${SECONDARY_COLOR}"
+  else
+    echo ":sun.max.fill: Claude: :person.crop.circle: Personal · :building.2.crop.circle: Team/Enterprise | size=11 color=${SECONDARY_COLOR}"
+  fi
+fi
 for provider in "${PROVIDERS[@]}"; do
   provider_call "$provider" render
 done
