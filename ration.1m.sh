@@ -958,7 +958,6 @@ menubar_source_name() {
   if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]]; then
     if [[ -n "$MENUBAR_LIMIT" ]]; then
       case "$MENUBAR_LIMIT" in
-        5-hours) echo "All providers · 5 hours" ;;
         weekly) echo "All providers · Weekly" ;;
         *) echo "All providers · ${MENUBAR_LIMIT//-/ }" ;;
       esac
