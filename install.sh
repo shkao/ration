@@ -22,6 +22,7 @@ echo
 echo "In SwiftBar > Preferences > Plugins, set the Plugin Folder to:"
 echo "  $SWIFTBAR_PLUGIN_DIR"
 echo
-echo "Note: only ration.1m.sh belongs in that folder. SwiftBar treats every"
-echo "executable file in the plugin folder as its own plugin, so the login"
+echo "Note: only ration.1m.sh and the optional ration-claude.1m.sh belong in"
+echo "that folder. SwiftBar treats every executable file in the plugin folder"
+echo "as its own plugin, so the login"
 echo "helper is installed elsewhere (~/.ration-helpers) on purpose."
