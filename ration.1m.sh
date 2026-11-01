@@ -827,7 +827,7 @@ first_letter() {
 }
 
 # Account i's menu bar icon by plan class, or its name when another account
-# would show the same icon.
+# would show the same icon under a different name.
 claude_plan_symbol() {
   local i="$1" j symbols=()
   for j in "${!CLAUDE_PLANS[@]}"; do
@@ -837,7 +837,8 @@ claude_plan_symbol() {
     esac
   done
   for j in "${!symbols[@]}"; do
-    if [[ "$j" != "$i" && "${symbols[j]}" == "${symbols[i]}" ]]; then
+    if [[ "$j" != "$i" && "${symbols[j]}" == "${symbols[i]}" \
+      && "${CLAUDE_NAMES[j]}" != "${CLAUDE_NAMES[i]}" ]]; then
       echo "${CLAUDE_NAMES[i]}"
       return
     fi

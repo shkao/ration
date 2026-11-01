@@ -1018,6 +1018,15 @@ touch "$FAKE_HOME/.config/ration/split-indicators"
 run_plugin RATION_SPLIT_ROLE=claude
 expect_contains ":person.crop.circle:30% · Acme Corp20% · Globex10% | size=12.5"
 
+begin "two personal accounts keep their icons when names can't tell them apart"
+seed_personal_claude "$(claude_usage_json 60 30)"
+seed_claude_account "Claude Code-credentials-9f8e7d6c" tok-pro pro \
+  default_claude_pro me@pro.example "Pro Cat" "$(claude_usage_json 40 15)"
+pin_menubar_source all:weekly
+run_plugin
+expect_contains ":person.crop.circle:30 :person.crop.circle:15% | size=12.5"
+expect_not_contains "Personal30"
+
 begin "showing each Claude account puts both numbers in the menu bar"
 seed_two_claude_accounts
 pin_menubar_source claude-each
