@@ -736,7 +736,7 @@ expect_contains "me@example.com · fetched at"
 expect_contains "Acme Corp · Team | size=12"
 expect_contains "95% used"
 expect_contains "me@acme.example · cached from"
-expect_contains "Usage token expired · run /usage in this account's Claude Code"
+expect_not_contains "Usage token expired"
 expect_not_contains "Sign-in expired"
 expect_check "expired work token reached the API again" test "$(grep -c '/usage' "$FAKE_HOME/curl-argv")" -eq 2
 

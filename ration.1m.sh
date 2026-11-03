@@ -690,7 +690,9 @@ claude_fetch_account() {
     json="$(cat "$cache")"
     fetched="$mtime"
   elif [[ -z "$token" || "$token" == "-" ]] || (( ${expires:-0} / 1000 <= now )); then
-    warning="Usage token expired · run /usage in this account's Claude Code"
+    # Tokens last only hours, so this is routine: with a cache, the
+    # "cached from" note says enough.
+    [[ -s "$cache" ]] || warning="Usage token expired · run /usage in this account's Claude Code"
   else
     CLAUDE_TOKEN="$token"
     response="$(run_with_timeout claude_request usage 2>/dev/null)"
