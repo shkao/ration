@@ -78,13 +78,25 @@ make_security() {
   cat > "$SECURITY_STUB" <<EOF
 #!/bin/bash
 dir='$FAKE_HOME/keychain'
+# An item named "<service>#<account>" carries an account; one without "#" has none.
 if [[ "\$1" == "dump-keychain" ]]; then
   for item in "\$dir"/*; do
-    [[ -e "\$item" ]] && printf '    "svce"<blob>="%s"\n' "\$(basename "\$item")"
+    [[ -e "\$item" ]] || continue
+    name="\$(basename "\$item")"
+    printf 'keychain: "login.keychain-db"\n'
+    [[ "\$name" == *"#"* ]] && printf '    "acct"<blob>="%s"\n' "\${name#*#}"
+    printf '    "svce"<blob>="%s"\n' "\${name%%#*}"
   done
   exit 0
 fi
-[[ "\$1" == "find-generic-password" && "\$2" == "-s" ]] && cat "\$dir/\$3"
+[[ "\$1" == "find-generic-password" && "\$2" == "-s" ]] || exit 44
+if [[ "\$4" == "-a" ]]; then
+  cat "\$dir/\$3#\$5"
+else
+  for item in "\$dir/\$3" "\$dir/\$3#"*; do
+    [[ -e "\$item" ]] && { cat "\$item"; break; }
+  done
+fi
 EOF
   chmod +x "$SECURITY_STUB"
 }
@@ -728,6 +740,17 @@ EXPIRES_MS=0 seed_claude_account "Claude Code-credentials" "" max default_claude
 run_plugin
 expect_contains "Personal · Max 5x | size=12"
 expect_contains "Signed out · run /login in this account's Claude Code"
+
+begin "a live Claude token wins over a blanked item under the same service"
+seed_personal_claude "$(claude_usage_json 70 40)"
+mv "$FAKE_HOME/keychain/Claude Code-credentials" "$FAKE_HOME/keychain/Claude Code-credentials#user"
+printf '{"claudeAiOauth": {"accessToken": "", "expiresAt": 0, "subscriptionType": "max"}}\n' \
+  > "$FAKE_HOME/keychain/Claude Code-credentials#unknown"
+run_plugin
+expect_contains "70% used"
+expect_contains "me@example.com · fetched at"
+expect_not_contains "Signed out"
+expect_check "one service showed up as two accounts" test "$(grep -c 'Personal · Max 5x | size=12' <<< "$OUTPUT")" -eq 1
 
 begin "a rejected Claude token falls back to the cached limits"
 seed_personal_claude

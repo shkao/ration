@@ -637,6 +637,27 @@ claude_services() {
     | sort -u
 }
 
+# One service can hold several items under different accounts: Claude Code
+# writes under $USER, or "unknown" when it ran without one, and the other item
+# keeps a stale or blank token. So read them all and keep the token that
+# expires last.
+claude_credentials() {
+  local service="$1" accounts account
+  accounts="$("$SECURITY_BIN" dump-keychain 2>/dev/null | awk -v svce="$service" '
+    /^keychain:/ { acct = "" }
+    /^ *"acct"<blob>="/ { acct = $0; sub(/^ *"acct"<blob>="/, "", acct); sub(/"$/, "", acct) }
+    index($0, "\"svce\"<blob>=\"" svce "\"") { print acct }')"
+  while IFS= read -r account; do
+    if [[ -n "$account" ]]; then
+      "$SECURITY_BIN" find-generic-password -s "$service" -a "$account" -w 2>/dev/null
+    else
+      "$SECURITY_BIN" find-generic-password -s "$service" -w 2>/dev/null
+    fi
+  done <<< "$accounts" | "$JQ_BIN" -cs \
+    'max_by(if (.claudeAiOauth.accessToken // "") == "" then -1
+            else .claudeAiOauth.expiresAt // 0 end) // empty' 2>/dev/null
+}
+
 # The token travels on curl's stdin, never in argv where `ps` would show it.
 # Prints the body, then the HTTP status on a line of its own.
 claude_request() {
@@ -675,7 +696,7 @@ claude_fetch_account() {
   local service="$1" cache creds token expires subscription tier now mtime=0
   local json="" warning="" fetched="" asof="" response status profile parsed
   cache="${CACHE_DIR}/claude${service#Claude Code-credentials}.json"
-  creds="$("$SECURITY_BIN" find-generic-password -s "$service" -w 2>/dev/null)"
+  creds="$(claude_credentials "$service")"
   # Process substitution, not a here-string: bash 3.2 backs a here-string
   # with a temp file, and this one would hold the token.
   IFS=$'\t' read -r token expires subscription tier < <(printf '%s' "$creds" \
