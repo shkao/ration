@@ -679,7 +679,7 @@ claude_fetch_account() {
   # Process substitution, not a here-string: bash 3.2 backs a here-string
   # with a temp file, and this one would hold the token.
   IFS=$'\t' read -r token expires subscription tier < <(printf '%s' "$creds" \
-    | "$JQ_BIN" -r '.claudeAiOauth | [(.accessToken // "-"), (.expiresAt // 0),
+    | "$JQ_BIN" -r '.claudeAiOauth | [(.accessToken // "" | if . == "" then "-" else . end), (.expiresAt // 0),
         (.subscriptionType // "-"), (.rateLimitTier // "-")] | @tsv' 2>/dev/null)
   [[ "$subscription" == "-" ]] && subscription=""
   [[ "$tier" == "-" ]] && tier=""
@@ -689,7 +689,11 @@ claude_fetch_account() {
   if (( now - mtime < CLAUDE_MIN_INTERVAL )); then
     json="$(cat "$cache")"
     fetched="$mtime"
-  elif [[ -z "$token" || "$token" == "-" ]] || (( ${expires:-0} / 1000 <= now )); then
+  elif [[ -z "$token" || "$token" == "-" ]]; then
+    # Claude Code blanks the token on logout or a failed refresh, so it
+    # won't come back by itself and any cache only grows staler.
+    warning="Signed out · run /login in this account's Claude Code"
+  elif (( ${expires:-0} / 1000 <= now )); then
     # Tokens last only hours, so this is routine: with a cache, the
     # "cached from" note says enough.
     [[ -s "$cache" ]] || warning="Usage token expired · run /usage in this account's Claude Code"

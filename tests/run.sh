@@ -708,6 +708,27 @@ expect_contains "Usage token expired · run /usage in this account's Claude Code
 expect_not_contains "Sign-in expired"
 expect_check "expired token was sent anyway" test ! -e "$FAKE_HOME/curl-argv"
 
+begin "a blanked Claude token warns even with cached limits"
+seed_personal_claude
+mkdir -p "$FAKE_HOME/Library/Caches/ration"
+# shellcheck disable=SC2016
+"$JQ" -cn --argjson usage "$(claude_usage_json 40 30)" --argjson profile "$(claude_profile_json me@example.com x)" \
+  '{subscription: "max", tier: "default_claude_max_5x", profile: $profile, usage: $usage}' \
+  > "$FAKE_HOME/Library/Caches/ration/claude.json"
+touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude.json"
+EXPIRES_MS=0 seed_claude_account "Claude Code-credentials" "" max default_claude_max_5x me@example.com x
+run_plugin
+expect_contains "40% used"
+expect_contains "Signed out · run /login in this account's Claude Code"
+expect_contains "me@example.com · cached from"
+expect_check "blank token reached the API" test ! -e "$FAKE_HOME/curl-argv"
+
+begin "a blanked Claude token without a cache keeps the plan"
+EXPIRES_MS=0 seed_claude_account "Claude Code-credentials" "" max default_claude_max_5x me@example.com x
+run_plugin
+expect_contains "Personal · Max 5x | size=12"
+expect_contains "Signed out · run /login in this account's Claude Code"
+
 begin "a rejected Claude token falls back to the cached limits"
 seed_personal_claude
 mkdir -p "$FAKE_HOME/Library/Caches/ration"
