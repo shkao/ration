@@ -589,6 +589,52 @@ touch -t 202608031200 "$FAKE_HOME/.codex/archived_sessions/rollout-old.jsonl"
 run_plugin
 expect_contains "85% used"
 
+# curl stub for ChatGPT's usage endpoint: prints $FAKE_HOME/codex-api when
+# the token arrives on stdin, fails like `curl -f` otherwise, and logs argv.
+make_codex_curl() {
+  CURL_STUB="$TMP/curl-$RANDOM"
+  cat > "$CURL_STUB" <<EOF
+#!/bin/bash
+printf '%s\n' "\$*" >> '$FAKE_HOME/curl-argv'
+grep -q '^Authorization: Bearer codex-token$' || exit 22
+[[ -e '$FAKE_HOME/codex-api' ]] || exit 22
+cat '$FAKE_HOME/codex-api'
+EOF
+  chmod +x "$CURL_STUB"
+}
+
+seed_codex_live() {
+  mkdir -p "$FAKE_HOME/.codex"
+  printf '%s\n' '{"tokens":{"access_token":"codex-token","account_id":"acct"}}' \
+    > "$FAKE_HOME/.codex/auth.json"
+  printf '{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":96,"limit_window_seconds":18000,"reset_at":%s},"secondary_window":{"used_percent":100,"limit_window_seconds":604800,"reset_at":%s}}}\n' \
+    "$(( $(date +%s) + 9000 ))" "$(( $(date +%s) + 302400 ))" > "$FAKE_HOME/codex-api"
+  make_codex_curl
+}
+
+begin "Codex shows account-wide usage over an older local snapshot"
+seed_codex_snapshot
+seed_codex_live
+run_plugin
+expect_contains " 96% used"
+expect_contains "100% used"
+expect_contains "ChatGPT Plus · fetched at"
+expect_not_contains "60% used"
+expect_check "the Codex token appeared in curl's argv" \
+  bash -c "! grep -q codex-token '$FAKE_HOME/curl-argv'"
+run_plugin
+expect_check "Codex usage was fetched again within five minutes" \
+  test "$(wc -l < "$FAKE_HOME/curl-argv")" -eq 1
+expect_contains "96% used"
+
+begin "Codex falls back to local sessions when the usage endpoint fails"
+seed_codex_snapshot
+seed_codex_live
+rm "$FAKE_HOME/codex-api"
+run_plugin
+expect_contains "60% used"
+expect_contains "ChatGPT Plus · local Codex snapshot"
+
 begin "Antigravity bypasses the CLI cache"
 make_agy "[[ \"\$*\" == \"--json --refresh\" ]] || exit 1
 cat <<'JSON'

@@ -86,7 +86,7 @@ mkdir -p ~/.config/ration && printf 'codex\nclaude\n' > ~/.config/ration/provide
 ```
 
 - **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
-- **Codex** needs a signed-in Codex app or CLI and one completed response. Ration reads the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account. It doesn't read credentials or make another API request.
+- **Codex** needs a signed-in Codex app or CLI and one completed response. Ration asks `chatgpt.com/backend-api/wham/usage`, the endpoint behind Codex's `/status`, at most once every five minutes with the access token Codex keeps in `~/.codex/auth.json`, so usage from your other machines shows up too. The token goes to curl on stdin and never lands in Ration's cache, and Ration never refreshes it, because that would replace the one Codex holds. When the request fails, Ration falls back to the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account.
 - **Claude** needs Claude Code signed in with a Claude plan. Ration reads the five-hour, weekly, and per-model weekly limits that `/usage` shows, which Claude Code and claude.ai share. It finds every account Claude Code has signed in on this Mac, one per config folder, and shows each with its own bars:
 
   ```bash
@@ -115,7 +115,7 @@ It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cac
 
 - `/copilot_internal/user` is undocumented and could change without notice.
 - Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
-- Codex usage updates only after Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
+- When the live request fails (offline, or a token Codex hasn't refreshed lately), Codex usage comes from local sessions and updates only after this Mac's Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
 - A Codex, Claude, or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
 - `/api/oauth/usage` is undocumented and could change without notice. An account you haven't used in Claude Code for a while shows cached numbers until Claude Code refreshes its sign-in.
 - The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.

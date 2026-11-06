@@ -492,6 +492,7 @@ CODEX_STATE="absent" # absent | ok
 CODEX_ROWS=""        # one window per line: label, used%, reset epoch, elapsed%
 CODEX_PLAN=""
 CODEX_ASOF=""
+CODEX_SOURCE="local" # local | live
 codex_candidate_files() {
   # A resumed session can live under any creation date, including the archive.
   # Sort metadata first so sessions older than the best snapshot need no reads.
@@ -499,10 +500,67 @@ codex_candidate_files() {
     -exec stat -f $'%m\t%z\t%N' {} + 2>/dev/null | sort -t $'\t' -k1,1nr
 }
 
+# Sessions only record limits this Mac's Codex saw, so usage from another
+# machine never lands on disk. ChatGPT's usage endpoint, the one behind
+# Codex's /status, reports the account-wide numbers. Ration reads Codex's
+# stored access token but never refreshes it, since that would rotate the
+# refresh token Codex holds; an expired token falls back to the sessions.
+CODEX_USAGE_API="https://chatgpt.com/backend-api/wham/usage"
+CODEX_LIVE_CACHE_FILE="${CACHE_DIR}/codex-live.tsv"
+CODEX_LIVE_MIN_INTERVAL=300
+
+# The token travels on curl's stdin, never in argv where `ps` would show it.
+codex_request() {
+  printf 'Authorization: Bearer %s\nChatGPT-Account-Id: %s\n' \
+    "$CODEX_TOKEN" "$CODEX_ACCOUNT" \
+    | "$CURL_BIN" -sS -f -H @- -A ration "$CODEX_USAGE_API"
+}
+
+# Prints one row in the session snapshot's TSV shape, recorded now, or
+# nothing when the account-wide numbers aren't available.
+codex_live() {
+  local now mtime=0 response
+  now="$(date +%s)"
+  [[ -s "$CODEX_LIVE_CACHE_FILE" ]] && mtime="$(stat -f %m "$CODEX_LIVE_CACHE_FILE" 2>/dev/null)"
+  if (( now - mtime < CODEX_LIVE_MIN_INTERVAL )); then
+    cat "$CODEX_LIVE_CACHE_FILE"
+    return 0
+  fi
+  [[ -z "$CURL_BIN" || ! -s "$CODEX_HOME/auth.json" ]] && return 0
+  # Process substitution, not a here-string: bash 3.2 backs a here-string
+  # with a temp file, and this one would hold the token.
+  IFS=$'\t' read -r CODEX_TOKEN CODEX_ACCOUNT < <("$JQ_BIN" -r \
+    '.tokens | [(.access_token // "-"), (.account_id // "-")] | @tsv' \
+    "$CODEX_HOME/auth.json" 2>/dev/null)
+  if [[ -n "$CODEX_TOKEN" && "$CODEX_TOKEN" != "-" ]]; then
+    [[ "$CODEX_ACCOUNT" == "-" ]] && CODEX_ACCOUNT=""
+    response="$(run_with_timeout codex_request 2>/dev/null)"
+  fi
+  unset CODEX_TOKEN CODEX_ACCOUNT
+  [[ -z "$response" ]] && return 0
+  # shellcheck disable=SC2016
+  response="$("$JQ_BIN" -r --argjson now "$now" '
+    select(.rate_limit.primary_window.used_percent != null)
+    | .rate_limit as $limit
+    | [$now, (.plan_type // "__RATION_NO_PLAN__"),
+       $limit.primary_window.used_percent,
+       ($limit.primary_window.limit_window_seconds / 60),
+       $limit.primary_window.reset_at,
+       ($limit.secondary_window.used_percent // ""),
+       (($limit.secondary_window.limit_window_seconds // empty) / 60 // ""),
+       ($limit.secondary_window.reset_at // "")]
+    | @tsv' <<< "$response" 2>/dev/null)"
+  [[ -z "$response" ]] && return 0
+  write_cache "$CODEX_LIVE_CACHE_FILE" "$response"
+  printf '%s\n' "$response"
+}
+
 codex_fetch() {
   local candidate_files signature cached_signature file modified _size snapshot parsed="" best=0
+  local live
+  live="$(codex_live)"
   candidate_files="$(codex_candidate_files)"
-  [[ -z "$candidate_files" ]] && return 0
+  [[ -z "$candidate_files" && -z "$live" ]] && return 0
   signature="v2:$(printf '%s\n' "$candidate_files" | cksum | awk '{ print $1 ":" $2 }')"
 
   if [[ -s "$CODEX_CACHE_FILE" ]]; then
@@ -536,6 +594,11 @@ codex_fetch() {
       fi
     done <<< "$candidate_files"
     write_cache "$CODEX_CACHE_FILE" "${signature}"$'\n'"${parsed}"
+  fi
+  # A response this Mac's Codex got after the last live fetch is newer still.
+  if [[ -n "$live" && ( -z "$parsed" || "${live%%$'\t'*}" -ge "${parsed%%$'\t'*}" ) ]]; then
+    parsed="$live"
+    CODEX_SOURCE="live"
   fi
   [[ -z "$parsed" ]] && return 0
 
@@ -580,7 +643,7 @@ codex_fetch() {
 }
 
 codex_export() {
-  declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN CODEX_ASOF
+  declare -p CODEX_STATE CODEX_ROWS CODEX_PLAN CODEX_ASOF CODEX_SOURCE
 }
 
 codex_postprocess() { :; }
@@ -600,8 +663,12 @@ codex_render() {
   print_quota_rows "$CODEX_ROWS"
   local plan_display="ChatGPT"
   [[ -n "$CODEX_PLAN" ]] && plan_display+=" $(first_letter "$CODEX_PLAN")${CODEX_PLAN:1}"
-  echo "${plan_display} · local Codex snapshot from $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
-  echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
+  if [[ "$CODEX_SOURCE" == "live" ]]; then
+    echo "${plan_display} · fetched at $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
+  else
+    echo "${plan_display} · local Codex snapshot from $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
+    echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
+  fi
 }
 
 codex_takeover() { return 1; }
