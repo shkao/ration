@@ -201,6 +201,28 @@ write_cache() {
   printf '%s\n' "$contents" > "$temporary" 2>/dev/null && mv -f "$temporary" "$path" 2>/dev/null
 }
 
+# An account used only on another Mac expires here, so this Mac can't ask for
+# its usage. Each Mac's Ration leaves the usage it fetched (never a token) in
+# iCloud Drive, stamped with when it was fetched, and a Mac that can't fetch
+# an account shows the newest copy instead. Off when iCloud Drive isn't set
+# up; tests point RATION_SHARE_DIR at a folder of their own.
+SHARE_DIR="${RATION_SHARE_DIR-${HOME}/Library/Mobile Documents/com~apple~CloudDocs/Ration}"
+
+# share_write NAME EPOCH PAYLOAD
+share_write() {
+  [[ -n "$SHARE_DIR" && -d "$(dirname "$SHARE_DIR")" ]] || return 0
+  mkdir -p "$SHARE_DIR" 2>/dev/null || return 0
+  local temporary
+  temporary="$(mktemp "${SHARE_DIR}/.$1.XXXXXX")" || return 0
+  printf '%s\n%s\n' "$2" "$3" > "$temporary" 2>/dev/null \
+    && mv -f "$temporary" "${SHARE_DIR}/$1" 2>/dev/null
+}
+
+# share_read NAME: the epoch on the first line, the payload on the second.
+share_read() {
+  [[ -n "$SHARE_DIR" && -s "${SHARE_DIR}/$1" ]] && cat "${SHARE_DIR}/$1" 2>/dev/null
+}
+
 # Marker is "│" (U+2502), not ASCII "|": a literal pipe would start the
 # SwiftBar parameter section and break the line.
 usage_bar() {
@@ -492,7 +514,7 @@ CODEX_STATE="absent" # absent | ok
 CODEX_ROWS=""        # one window per line: label, used%, reset epoch, elapsed%
 CODEX_PLAN=""
 CODEX_ASOF=""
-CODEX_SOURCE="local" # local | live
+CODEX_SOURCE="local" # local | live | shared (another Mac's fetch)
 codex_candidate_files() {
   # A resumed session can live under any creation date, including the archive.
   # Sort metadata first so sessions older than the best snapshot need no reads.
@@ -518,28 +540,35 @@ codex_request() {
     | "$CURL_BIN" -sS -f -H @- -A ration "$CODEX_USAGE_API"
 }
 
-# Prints one row in the session snapshot's TSV shape, recorded now, or
-# nothing when the account-wide numbers aren't available.
+# Prints the source ("live", or "shared" for another Mac's fetch), a tab and
+# one row in the session snapshot's TSV shape, or nothing when the
+# account-wide numbers aren't available.
 codex_live() {
-  local now mtime=0 response
+  local now mtime=0 response account="" shared
   now="$(date +%s)"
   [[ -s "$CODEX_LIVE_CACHE_FILE" ]] && mtime="$(stat -f %m "$CODEX_LIVE_CACHE_FILE" 2>/dev/null)"
   if (( now - mtime < CODEX_LIVE_MIN_INTERVAL )); then
-    cat "$CODEX_LIVE_CACHE_FILE"
+    printf 'live\t%s\n' "$(cat "$CODEX_LIVE_CACHE_FILE")"
     return 0
   fi
-  [[ -z "$CURL_BIN" || ! -s "$CODEX_HOME/auth.json" ]] && return 0
+  [[ -s "$CODEX_HOME/auth.json" ]] || return 0
   # Process substitution, not a here-string: bash 3.2 backs a here-string
   # with a temp file, and this one would hold the token.
   IFS=$'\t' read -r CODEX_TOKEN CODEX_ACCOUNT < <("$JQ_BIN" -r \
     '.tokens | [(.access_token // "-"), (.account_id // "-")] | @tsv' \
     "$CODEX_HOME/auth.json" 2>/dev/null)
-  if [[ -n "$CODEX_TOKEN" && "$CODEX_TOKEN" != "-" ]]; then
-    [[ "$CODEX_ACCOUNT" == "-" ]] && CODEX_ACCOUNT=""
+  [[ "$CODEX_ACCOUNT" != "-" ]] && account="$CODEX_ACCOUNT"
+  CODEX_ACCOUNT="$account"
+  if [[ -n "$CURL_BIN" && -n "$CODEX_TOKEN" && "$CODEX_TOKEN" != "-" ]]; then
     response="$(run_with_timeout codex_request 2>/dev/null)"
   fi
   unset CODEX_TOKEN CODEX_ACCOUNT
-  [[ -z "$response" ]] && return 0
+  if [[ -z "$response" ]]; then
+    if [[ -n "$account" ]] && shared="$(share_read "codex-${account}")"; then
+      [[ "$shared" == *$'\n'* ]] && printf 'shared\t%s\n' "${shared#*$'\n'}"
+    fi
+    return 0
+  fi
   # shellcheck disable=SC2016
   response="$("$JQ_BIN" -r --argjson now "$now" '
     select(.rate_limit.primary_window.used_percent != null)
@@ -554,13 +583,16 @@ codex_live() {
     | @tsv' <<< "$response" 2>/dev/null)"
   [[ -z "$response" ]] && return 0
   write_cache "$CODEX_LIVE_CACHE_FILE" "$response"
-  printf '%s\n' "$response"
+  [[ -n "$account" ]] && share_write "codex-${account}" "$now" "$response"
+  printf 'live\t%s\n' "$response"
 }
 
 codex_fetch() {
   local candidate_files signature cached_signature file modified _size snapshot parsed="" best=0
-  local live
+  local live source
   live="$(codex_live)"
+  source="${live%%$'\t'*}"
+  live="${live#*$'\t'}"
   candidate_files="$(codex_candidate_files)"
   [[ -z "$candidate_files" && -z "$live" ]] && return 0
   signature="v2:$(printf '%s\n' "$candidate_files" | cksum | awk '{ print $1 ":" $2 }')"
@@ -600,7 +632,7 @@ codex_fetch() {
   # A response this Mac's Codex got after the last live fetch is newer still.
   if [[ -n "$live" && ( -z "$parsed" || "${live%%$'\t'*}" -ge "${parsed%%$'\t'*}" ) ]]; then
     parsed="$live"
-    CODEX_SOURCE="live"
+    CODEX_SOURCE="$source"
   fi
   [[ -z "$parsed" ]] && return 0
 
@@ -667,6 +699,8 @@ codex_render() {
   [[ -n "$CODEX_PLAN" ]] && plan_display+=" $(first_letter "$CODEX_PLAN")${CODEX_PLAN:1}"
   if [[ "$CODEX_SOURCE" == "live" ]]; then
     echo "${plan_display} · fetched at $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
+  elif [[ "$CODEX_SOURCE" == "shared" ]]; then
+    echo "${plan_display} · fetched by another Mac at $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
   else
     echo "${plan_display} · local Codex snapshot from $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
     echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
@@ -761,9 +795,17 @@ parse_claude() {
      | @tsv)' 2>/dev/null
 }
 
+# Account and organization IDs: the same on every Mac, unlike the Keychain
+# service name, which hashes the config dir path.
+claude_share_key() {
+  "$JQ_BIN" -r '.profile | select(.account.uuid != null)
+    | "\(.account.uuid)-\(.organization.uuid // "none")"' 2>/dev/null
+}
+
 claude_fetch_account() {
   local service="$1" cache creds token expires subscription tier now mtime=0
   local json="" warning="" fetched="" asof="" response status profile parsed
+  local key shared shared_at=""
   cache="${CACHE_DIR}/claude${service#Claude Code-credentials}.json"
   creds="$(claude_credentials "$service")"
   # Process substitution, not a here-string: bash 3.2 backs a here-string
@@ -806,6 +848,8 @@ claude_fetch_account() {
       if [[ -n "$json" ]]; then
         write_cache "$cache" "$json"
         fetched="$now"
+        key="$(claude_share_key <<< "$json")"
+        [[ -n "$key" ]] && share_write "claude-${key}" "$now" "$json"
       else
         warning="Unexpected response from the Claude usage API"
       fi
@@ -822,6 +866,16 @@ claude_fetch_account() {
   if [[ -z "$json" && -s "$cache" ]]; then
     json="$(cat "$cache")"
     asof="$(stamp "$mtime")"
+    # Another Mac that uses this account may have fetched it since.
+    key="$(claude_share_key <<< "$json")"
+    if [[ -n "$key" ]] && shared="$(share_read "claude-${key}")" \
+      && [[ "$shared" == *$'\n'* ]] && (( ${shared%%$'\n'*} > mtime )); then
+      json="${shared#*$'\n'}"
+      asof=""
+      shared_at="${shared%%$'\n'*}"
+      # The account's numbers are current, so this Mac's token doesn't matter.
+      [[ "$warning" == "Signed out"* ]] || warning=""
+    fi
   fi
   # shellcheck disable=SC2016
   [[ -z "$json" ]] && json="$("$JQ_BIN" -cn --arg subscription "$subscription" --arg tier "$tier" \
@@ -836,6 +890,7 @@ claude_fetch_account() {
   note="$(sanitize_error "$email")"
   [[ -n "$fetched" ]] && note="${note:+${note} · }fetched at $(stamp "$fetched")"
   [[ -n "$asof" ]] && note="${note:+${note} · }cached from ${asof}"
+  [[ -n "$shared_at" ]] && note="${note:+${note} · }fetched by another Mac at $(stamp "$shared_at")"
   local id="${service#Claude Code-credentials-}"
   [[ "$id" == "$service" ]] && id="default"
   CLAUDE_IDS+=("$id")

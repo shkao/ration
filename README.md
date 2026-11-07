@@ -109,6 +109,8 @@ Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own
 
 For Claude, it reads each account's access token from the macOS Keychain and asks `api.anthropic.com/api/oauth/usage`, the endpoint behind `/usage`, at most once every five minutes per account. The token goes to curl on stdin, so it never shows in a process list, and it never lands in Ration's cache. Ration doesn't refresh an expired token, because that would replace the one Claude Code holds. It keeps the cached numbers with their timestamp and reports that this account's usage token expired or was rejected. This doesn't mean your Claude subscription or other sessions expired. Run `/usage` in Claude Code for the affected account to refresh its credentials; for a custom config directory, use that account's launcher.
 
+An account you use on another Mac expires on this one, since only a running Claude Code renews its token. So each Mac's Ration also writes the Claude and Codex usage it fetched to `iCloud Drive/Ration/`, one small file per account with its fetch time and no tokens. When this Mac can't fetch an account itself, it shows the newer copy from another Mac, marked "fetched by another Mac". Install Ration on both Macs and sign both into the same iCloud account; without iCloud Drive, Ration skips this.
+
 It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cache. It caches the last good provider responses at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration asks you to sign in when a previously detected Copilot account has no local token or GitHub rejects that token.
 
 ## Caveats
@@ -117,7 +119,7 @@ It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cac
 - Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
 - When the live request fails (offline, or a token Codex hasn't refreshed lately), Codex usage comes from local sessions and updates only after this Mac's Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
 - A Codex, Claude, or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
-- `/api/oauth/usage` is undocumented and could change without notice. An account you haven't used in Claude Code for a while shows cached numbers until Claude Code refreshes its sign-in.
+- `/api/oauth/usage` is undocumented and could change without notice. An account you haven't used in Claude Code for a while shows cached numbers until Claude Code refreshes its sign-in, or until another Mac running Ration shares newer ones through iCloud Drive (which can lag a minute or more).
 - The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.
 
 ## Testing
@@ -135,6 +137,7 @@ These commands use the default plugin folder. If you installed into a custom `SW
 ```bash
 rm -f ~/.swiftbar-plugins/ration.1m.sh ~/.swiftbar-plugins/ration-claude.1m.sh
 rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
+rm -rf ~/Library/Mobile\ Documents/com~apple~CloudDocs/Ration
 ```
 
 <details>

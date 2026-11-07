@@ -627,6 +627,27 @@ expect_check "Codex usage was fetched again within five minutes" \
   test "$(wc -l < "$FAKE_HOME/curl-argv")" -eq 1
 expect_contains "96% used"
 
+begin "Codex shares live usage with other Macs and never the token"
+seed_codex_live
+printf '%s\n' '{"tokens":{"access_token":"codex-token","account_id":"acct"}}' \
+  > "$FAKE_HOME/.codex/auth.json"
+run_plugin RATION_SHARE_DIR="$FAKE_HOME/share"
+expect_check "live Codex usage was not shared" test -s "$FAKE_HOME/share/codex-acct"
+expect_check "the shared Codex file holds the token" \
+  bash -c "! grep -q codex-token '$FAKE_HOME/share/codex-acct'"
+
+begin "Codex shows another Mac's usage when this Mac can't fetch"
+seed_codex_snapshot
+seed_codex_live
+rm "$FAKE_HOME/codex-api"
+mkdir -p "$FAKE_HOME/share"
+printf '%s\n%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$(date +%s)" plus 42 300 \
+  "$(( $(date +%s) + 9000 ))" 7 10080 "$(( $(date +%s) + 302400 ))" > "$FAKE_HOME/share/codex-acct"
+run_plugin RATION_SHARE_DIR="$FAKE_HOME/share"
+expect_contains " 42% used"
+expect_contains "ChatGPT Plus · fetched by another Mac at"
+expect_not_contains "60% used"
+
 begin "Codex falls back to local sessions when the usage endpoint fails"
 seed_codex_snapshot
 seed_codex_live
@@ -797,6 +818,37 @@ expect_contains "70% used"
 expect_contains "me@example.com · fetched at"
 expect_not_contains "Signed out"
 expect_check "one service showed up as two accounts" test "$(grep -c 'Personal · Max 5x | size=12' <<< "$OUTPUT")" -eq 1
+
+begin "Claude shares fetched usage with other Macs and never the token"
+seed_personal_claude
+"$JQ" -c '.account.uuid = "acct-1" | .organization.uuid = "org-1"' \
+  <(claude_profile_json me@example.com "Octo Cat") \
+  | { cat; echo 200; } > "$FAKE_HOME/claude-api/tok-personal/profile"
+run_plugin RATION_SHARE_DIR="$FAKE_HOME/share"
+expect_check "fetched Claude usage was not shared" test -s "$FAKE_HOME/share/claude-acct-1-org-1"
+expect_check "the shared Claude file holds the token" \
+  bash -c "! grep -q tok-personal '$FAKE_HOME/share/claude-acct-1-org-1'"
+
+begin "an expired Claude token shows another Mac's newer usage"
+EXPIRES_MS=1000 seed_personal_claude
+mkdir -p "$FAKE_HOME/Library/Caches/ration" "$FAKE_HOME/share"
+profile="$("$JQ" -c '.account.uuid = "acct-1" | .organization.uuid = "org-1"' \
+  <(claude_profile_json me@example.com x))"
+# shellcheck disable=SC2016
+"$JQ" -cn --argjson usage "$(claude_usage_json 40 30)" --argjson profile "$profile" \
+  '{subscription: "max", tier: "default_claude_max_5x", profile: $profile, usage: $usage}' \
+  > "$FAKE_HOME/Library/Caches/ration/claude.json"
+touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude.json"
+# shellcheck disable=SC2016
+printf '%s\n%s\n' "$(date +%s)" "$("$JQ" -cn --argjson usage "$(claude_usage_json 70 55)" \
+  --argjson profile "$profile" \
+  '{subscription: "max", tier: "default_claude_max_5x", profile: $profile, usage: $usage}')" \
+  > "$FAKE_HOME/share/claude-acct-1-org-1"
+run_plugin RATION_SHARE_DIR="$FAKE_HOME/share"
+expect_contains " 70% used"
+expect_contains "me@example.com · fetched by another Mac at"
+expect_not_contains "40% used"
+expect_not_contains "cached from"
 
 begin "a rejected Claude token falls back to the cached limits"
 seed_personal_claude
