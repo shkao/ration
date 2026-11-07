@@ -507,7 +507,9 @@ codex_candidate_files() {
 # refresh token Codex holds; an expired token falls back to the sessions.
 CODEX_USAGE_API="https://chatgpt.com/backend-api/wham/usage"
 CODEX_LIVE_CACHE_FILE="${CACHE_DIR}/codex-live.tsv"
-CODEX_LIVE_MIN_INTERVAL=300
+# Under SwiftBar's one-minute refresh, so every run asks again; the cache
+# only spares the split layout's second launcher a duplicate request.
+CODEX_LIVE_MIN_INTERVAL=50
 
 # The token travels on curl's stdin, never in argv where `ps` would show it.
 codex_request() {
