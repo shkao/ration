@@ -289,6 +289,10 @@ print_quota_rows() {
   local rows="$1" label used reset_epoch elapsed
   while IFS=$'\t' read -r label used reset_epoch elapsed; do
     [[ -z "$label" ]] && continue
+    if [[ "$used" == "unavailable" ]]; then
+      echo "${label}: usage unavailable | size=11 color=${ORANGE}"
+      continue
+    fi
     print_limit_line "$label" "$used" "$(pace_color "$used" "$elapsed")" "$elapsed"
     echo "Resets $(format_reset "$reset_epoch") | size=11 color=${SECONDARY_COLOR}"
   done <<< "$rows"
@@ -331,6 +335,13 @@ update_header_from_rows() {
   local provider="$1" rows="$2" label used elapsed quota_rank current_rank
   while IFS=$'\t' read -r label used _ elapsed; do
     [[ -z "$label" ]] && continue
+    if [[ "$used" == "unavailable" ]]; then
+      if [[ "$HEADER_COLOR" == "$GREEN" ]]; then
+        HEADER_COLOR="$ORANGE"
+        HEADER_STATUS="${provider} ${label} usage unavailable"
+      fi
+      continue
+    fi
     quota_rank="$(pace_rank "$used" "$elapsed")"
     current_rank="$(color_rank "$HEADER_COLOR")"
     # An exhausted quota (rank 4) outranks every color, even another red.
@@ -348,7 +359,7 @@ update_header_from_rows() {
 
 # Highest used% across TSV quota rows on stdin, rounded; nothing when empty.
 max_used_pct() {
-  awk -F'\t' '$2 != "" && (!seen || $2 > max) { max = $2; seen = 1 }
+  awk -F'\t' '$2 != "" && $2 != "unavailable" && (!seen || $2 > max) { max = $2; seen = 1 }
     END { if (seen) printf "%.0f", max }'
 }
 
@@ -415,7 +426,7 @@ AGY_FETCHED=""
 # One jq pass over a snapshot: email on the first line, then one TSV row per
 # quota group. Empty output means the payload isn't a usable snapshot.
 # Weekly rolling window: elapsed = share of the 7 days already gone. A cached
-# snapshot whose reset has passed reads as an unused window, reset unknown.
+# snapshot whose reset has passed has unavailable usage.
 parse_antigravity() {
   # shellcheck disable=SC2016
   "$JQ_BIN" -r '
@@ -427,7 +438,7 @@ parse_antigravity() {
           ["Claude+GPT", map(select(.modelId | test("^(claude|gpt)")))]][]
        | select(.[1] | length > 0)
        | (.[1][0].resetTime | fromdate) as $reset
-       | if $reset <= now then [.[0], 0, "null", 0]
+       | if $reset <= now then [.[0], "unavailable", "null", 0]
          else [.[0],
                ((1 - .[1][0].remainingPercentage) * 100),
                $reset,
@@ -648,11 +659,11 @@ codex_fetch() {
     local used window reset
     IFS=: read -r used window reset <<< "$slot"
     [[ -z "$used" || -z "$window" || -z "$reset" ]] && continue
-    # A window that reset after the snapshot has no usage yet, and its next
+    # A window that reset after the snapshot has unknown usage, and its next
     # reset is unknown until Codex reports again. "null", not empty: tab is
     # IFS whitespace, so an empty field would shift the ones after it.
     if (( reset <= now )); then
-      used=0; reset="null"
+      used="unavailable"; reset="null"
     fi
     elapsed="$(awk -v now="$now" -v reset="$reset" -v minutes="$window" 'BEGIN {
       if (reset == "null") { printf "0"; exit }
@@ -767,7 +778,7 @@ claude_request() {  # TOKEN PATH
 # One jq pass over {subscription, tier, profile, usage}: account name, plan,
 # and email on the first three lines, then one TSV row per limit. Windows are
 # fixed (5 hours, 7 days), so elapsed comes from the reset time. A window
-# without a reset, or one past it in a cached snapshot, reads as unused.
+# without a reset reads as unused; a past reset has unavailable usage.
 parse_claude() {
   # shellcheck disable=SC2016
   "$JQ_BIN" -r '
@@ -783,7 +794,8 @@ parse_claude() {
         | [(.scope.model.display_name // "Model"), .percent, .resets_at, 604800]]
      | .[] | select(.[1] != null)
      | (if .[2] == null then null else (.[2] | epoch) end) as $reset
-     | if $reset == null or $reset <= now then [.[0], 0, "null", 0]
+     | if $reset == null then [.[0], 0, "null", 0]
+       elif $reset <= now then [.[0], "unavailable", "null", 0]
        else [.[0], .[1], $reset,
              ((now - ($reset - .[3])) / .[3] * 100
               | if . < 0 then 0 elif . > 100 then 100 else . end)]
@@ -1006,6 +1018,7 @@ claude_each_title() {
   for i in "${!CLAUDE_NAMES[@]}"; do
     rows="$(claude_account_rows "$i" "${2:-}")" || continue
     used="$(max_used_pct <<< "$rows")"
+    [[ -n "$used" ]] || continue
     name="${CLAUDE_NAMES[i]}"
     [[ "$style" == "initials" ]] && name="$(first_letter "$name")"
     if [[ "$style" == "symbols" ]]; then
@@ -1043,6 +1056,7 @@ all_providers_title() {
       for i in "${!CLAUDE_NAMES[@]}"; do
         rows="$(claude_account_rows "$i" "$MENUBAR_SELECTOR")" || continue
         used="$(max_used_pct <<< "$rows")"
+        [[ -n "$used" ]] || continue
         name="${CLAUDE_NAMES[i]}"
         if [[ "$style" == "compact" ]]; then
           name="$(claude_plan_symbol "$i")"
@@ -1213,7 +1227,7 @@ print_signin_menu() {
 # "in use" when gh is installed and signed in, or when a previous run left a
 # cache (so a signed-out Copilot user gets a re-login prompt instead of a
 # silently vanished section). No gh, no token, no cache: no Copilot section.
-CP_STATE="absent" # absent | ok | offline | signedout | expired | nocopilot | unreachable | badresponse
+CP_STATE="absent" # absent | ok | offline | stale | signedout | expired | nocopilot | unreachable | badresponse
 CP_ERR=""
 OFFLINE_ASOF=""
 CP_FETCHED=""
@@ -1322,14 +1336,10 @@ else
   ELAPSED_PCT=""
 fi
 
-# A cached snapshot from before the reset says nothing about the new month:
-# show a full ration with the reset unknown, as the other providers do.
+# An old snapshot cannot describe usage in the new billing period.
 if [[ -n "$OFFLINE_ASOF" && -n "$EPOCH_END" ]] && (( EPOCH_END <= EPOCH_NOW )); then
-  ACTUAL_USED_PCT=0
-  PERCENT_REMAINING=100
-  REMAINING="$ENTITLEMENT"
-  EPOCH_END="null"
-  ELAPSED_PCT=""
+  CP_STATE="stale"
+  return 0
 fi
 
 # format_reset always yields text ("unknown" when the epoch is unparsable).
@@ -1370,7 +1380,10 @@ copilot_rows() {
 }
 
 copilot_update_header() {
-  if copilot_has_data; then
+  if [[ "$CP_STATE" == "stale" && "$HEADER_COLOR" == "$GREEN" ]]; then
+    HEADER_COLOR="$ORANGE"
+    HEADER_STATUS="Copilot Monthly usage unavailable"
+  elif copilot_has_data; then
     HEADER_COLOR="$COLOR"
     HEADER_STATUS="$STATUS"
   fi
@@ -1393,6 +1406,9 @@ copilot_render() {
       echo "Resets ${RESET_DISPLAY} · $(printf '%.0f' "$REMAINING") of ${ENTITLEMENT} left | size=11 color=${SECONDARY_COLOR}"
       echo "${LOGIN} · ${PLAN} (${ORG}) | size=11 color=${SECONDARY_COLOR}"
       [[ -n "$CP_FETCHED" ]] && echo "Copilot fetched at ${CP_FETCHED} | size=11 color=${SECONDARY_COLOR}"
+      ;;
+    stale)
+      echo "Monthly: usage unavailable | size=11 color=${ORANGE}"
       ;;
     signedout | expired)
       local headline="Not signed in to GitHub"
@@ -1550,7 +1566,8 @@ TITLE_OFFLINE_ICON="$HEADER_ICON"
 ALL_CODEX_ICON="false"
 if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]]; then
   for provider in "${PROVIDERS[@]}"; do
-    provider_call "$provider" rows "$MENUBAR_SELECTOR" >/dev/null || continue
+    rows="$(provider_call "$provider" rows "$MENUBAR_SELECTOR")" || continue
+    [[ -n "$(max_used_pct <<< "$rows")" ]] || continue
     [[ "$provider" == "codex" ]] && ALL_CODEX_ICON="true"
     break
   done

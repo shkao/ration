@@ -124,7 +124,7 @@ Good responses are cached in `~/Library/Caches/ration/`. A 15-second watchdog tr
 - `/copilot_internal/user`, `/api/oauth/usage`, and the Codex usage endpoint are undocumented and could change without notice.
 - Copilot pace assumes a monthly cycle starting one calendar month before the reset date, which matches standard business and enterprise billing.
 - When Codex's live request fails (offline, or a token Codex hasn't refreshed lately), its usage updates only after this Mac's Codex gets a response. ChatGPT web-chat limits aren't stored anywhere Ration can read.
-- A window whose reset time passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
+- A window whose reset time passed since its last snapshot shows usage as unavailable until fresh data arrives.
 - A Claude account you haven't used here for a while shows cached numbers until Claude Code renews its sign-in, or another Mac shares newer ones (iCloud can lag a minute or more).
 - Antigravity shows percentages only; its CLI doesn't expose request counts.
 

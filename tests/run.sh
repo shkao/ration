@@ -377,15 +377,15 @@ expect_contains "Monthly:"
 expect_contains "25% used"
 expect_not_contains "Unexpected response from Copilot API"
 
-begin "cached Copilot data from before the reset reads as a full ration"
+begin "cached Copilot data from before the reset is unavailable"
 mkdir -p "$FAKE_HOME/Library/Caches/ration"
 copilot_json 10 100 | sed 's/"quota_reset_date_utc": "[^"]*"/"quota_reset_date_utc": "2020-01-01T00:00:00.000Z"/' \
   > "$FAKE_HOME/Library/Caches/ration/quota.json"
 make_gh "echo 'error connecting to api.github.com: no such host'; exit 1"
 run_plugin
 expect_contains "Offline · cached data from"
-expect_contains "Monthly:    [░░░░░░░░░░░░░░░░]   0% used"
-expect_contains "Resets unknown · 1000 of 1000 left"
+expect_contains "Monthly: usage unavailable"
+expect_not_contains "1000 of 1000 left"
 expect_not_contains "90% used"
 
 begin "a finished fetch leaves no watchdog sleep behind"
@@ -516,14 +516,14 @@ seed_agy_cache
 run_plugin
 expect_contains "octocat@example.com · cached from"
 
-begin "a cached Antigravity quota past its reset reads as unused"
+begin "a cached Antigravity quota past its reset is unavailable"
 make_gh_ok
 make_agy "exit 1"
 mkdir -p "$FAKE_HOME/Library/Caches/ration"
 agy_json | sed 's/"resetTime": "[^"]*"/"resetTime": "2020-01-01T00:00:00Z"/' \
   > "$FAKE_HOME/Library/Caches/ration/antigravity.json"
 run_plugin
-expect_contains "Gemini:     [│░░░░░░░░░░░░░░░]   0% used"
+expect_contains "Gemini: usage unavailable"
 expect_not_contains "60% used"
 
 begin "antigravity CLI failure without cache degrades to one line"
@@ -560,14 +560,14 @@ printf '{"timestamp":"2026-08-01T10:00:05Z","type":"event_msg","payl' \
 run_plugin
 expect_contains "5 hours:    [████████│█░░░░░░]  60% used"
 
-begin "a Codex window past its reset reads as unused, not stale"
+begin "a Codex window past its reset is unavailable"
 GH_STUB=""
 seed_codex_snapshot
 sed -i '' 's/"used_percent":60.0,"window_minutes":300,"resets_at":[0-9]*/"used_percent":99.0,"window_minutes":300,"resets_at":1000/' \
   "$FAKE_HOME/.codex/sessions/2026/08/01/rollout-test.jsonl"
 run_plugin
-expect_contains "5 hours:    [│░░░░░░░░░░░░░░░]   0% used"
-expect_contains "Resets unknown"
+expect_contains "5 hours: usage unavailable"
+expect_contains "Codex 5 hours usage unavailable"
 expect_contains "25% | size=12.5"
 expect_not_contains "99% used"
 
@@ -884,7 +884,7 @@ expect_contains "Personal · Max 5x | size=12"
 expect_contains "Claude usage API answered HTTP 429"
 expect_not_contains "% used"
 
-begin "a cached Claude window past its reset reads as unused"
+begin "a cached Claude window past its reset is unavailable"
 seed_personal_claude '{}' 503
 mkdir -p "$FAKE_HOME/Library/Caches/ration"
 # shellcheck disable=SC2016
@@ -893,7 +893,7 @@ mkdir -p "$FAKE_HOME/Library/Caches/ration"
   > "$FAKE_HOME/Library/Caches/ration/claude.json"
 touch -t 202001010000 "$FAKE_HOME/Library/Caches/ration/claude.json"
 run_plugin
-expect_contains "5 hours:    [│░░░░░░░░░░░░░░░]   0% used"
+expect_contains "5 hours: usage unavailable"
 expect_not_contains "90% used"
 expect_contains "Personal · Max | size=12"
 
