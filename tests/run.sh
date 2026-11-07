@@ -1,10 +1,10 @@
 #!/bin/bash
 # Integration tests for ration.1m.sh.
 #
-# Each test runs the real plugin end to end against stub `gh` /
-# `antigravity-usage` binaries and an isolated $HOME, then asserts on the
-# rendered SwiftBar output. Requires macOS (the plugin uses BSD `date`) and
-# a real `jq` on PATH.
+# Each test runs the real plugin end to end against stub `gh`,
+# `antigravity-usage`, `security`, and `curl` binaries and an isolated
+# $HOME, then asserts on the rendered SwiftBar output. Requires macOS (the
+# plugin uses BSD `date`) and a real `jq` on PATH.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -370,8 +370,6 @@ run_plugin
 expect_contains "GitHub is unreachable and no cached data yet"
 expect_not_contains "Sign in with GitHub"
 
-# RATION_TIMEOUT=1 shrinks the watchdog so these stay fast; the stubs
-# sleep past it to simulate a stalled network call.
 begin "a gh warning on stderr doesn't spoil a good response"
 make_gh "echo 'warning: gh is out of date' >&2; echo '$(copilot_json 75 750)'; exit 0"
 run_plugin
@@ -396,6 +394,8 @@ run_plugin RATION_TIMEOUT=37
 expect_check "watchdog sleep outlived the fetch" sh -c '! pgrep -qx -f "sleep 37"'
 pkill -x -f "sleep 37" 2>/dev/null
 
+# RATION_TIMEOUT=1 shrinks the watchdog so these stay fast; the stubs
+# sleep past it to simulate a stalled network call.
 begin "hung gh call times out instead of hanging the refresh"
 make_gh "sleep 2; echo 'never arrives'; exit 0"
 run_plugin RATION_TIMEOUT=1
@@ -473,12 +473,12 @@ run_plugin
 expect_contains "First-time setup · choose at least one quota source"
 
 begin "README gives first-time requirements"
-expect_check "README has no first-time checklist" grep -qF \
-  "### First-time checklist" "$ROOT/README.md"
+expect_check "README has no quick start" grep -qF \
+  "## Quick start" "$ROOT/README.md"
 expect_check "README omits the provider choice requirement" grep -qF \
-  "Set up at least one quota source" "$ROOT/README.md"
+  "Set up at least one provider" "$ROOT/README.md"
 expect_check "README omits the Copilot seat requirement" grep -qF \
-  "active Copilot seat" "$ROOT/README.md"
+  "with a Copilot seat" "$ROOT/README.md"
 expect_check "README omits the Codex sign-in requirement" grep -qF \
   "Codex app or CLI" "$ROOT/README.md"
 
@@ -623,7 +623,7 @@ expect_not_contains "60% used"
 expect_check "the Codex token appeared in curl's argv" \
   bash -c "! grep -q codex-token '$FAKE_HOME/curl-argv'"
 run_plugin
-expect_check "Codex usage was fetched again within five minutes" \
+expect_check "Codex usage was fetched again within the 50s cache" \
   test "$(wc -l < "$FAKE_HOME/curl-argv")" -eq 1
 expect_contains "96% used"
 
@@ -782,7 +782,6 @@ EXPIRES_MS=1000 seed_personal_claude
 run_plugin
 expect_contains "Personal · Max 5x | size=12"
 expect_contains "Usage token expired · run /usage in this account's Claude Code"
-expect_not_contains "Sign-in expired"
 expect_check "expired token was sent anyway" test ! -e "$FAKE_HOME/curl-argv"
 
 begin "a blanked Claude token warns even with cached limits"
@@ -860,7 +859,6 @@ printf '{"error": "unauthorized"}\n401\n' > "$FAKE_HOME/claude-api/tok-personal/
 run_plugin
 expect_contains "40% used"
 expect_contains "Usage token rejected · run /usage in this account's Claude Code"
-expect_not_contains "Sign-in expired"
 expect_contains "me@example.com · cached from"
 
 begin "an expired work token keeps cached usage beside a live personal account"
@@ -877,7 +875,6 @@ expect_contains "Acme Corp · Team | size=12"
 expect_contains "95% used"
 expect_contains "me@acme.example · cached from"
 expect_not_contains "Usage token expired"
-expect_not_contains "Sign-in expired"
 expect_check "expired work token reached the API again" test "$(grep -c '/usage' "$FAKE_HOME/curl-argv")" -eq 2
 
 begin "a rate-limited Claude API without a cache explains itself"
@@ -1021,7 +1018,7 @@ GH_STUB=""
 make_agy "echo '$(agy_exhausted_json)'"
 pin_menubar_source antigravity
 run_plugin
-# Red must not rely on color alone, so the triangle wins the icon slot — and
+# Red must not rely on color alone, so the triangle wins the icon slot, and
 # the name comes back, since the mark is no longer there to identify the tool.
 expect_contains "Antigravity 100% | size=12.5 color="
 expect_contains "sfimage=exclamationmark.triangle"

@@ -1,14 +1,12 @@
 <h1 align="center">Ration</h1>
 
-<p align="center"><em>Track your AI quota like a ration: know from your menu bar whether it'll last to reset day.</em></p>
+<p align="center"><strong>Know from your menu bar whether your AI quota will last to reset day.</strong></p>
 
 <p align="center">
   <a href="https://github.com/shkao/ration/actions/workflows/ci.yml"><img src="https://github.com/shkao/ration/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Platform-macOS-lightgrey.svg" alt="Platform: macOS">
 </p>
-
-Your employer hands you a fixed ration of AI requests: GitHub Copilot premium requests, Codex usage limits, Claude plan limits, Google Antigravity model quotas. Nothing warns you when you're spending it too fast, so you find out you've run out the hard way, when a request gets refused days before the reset. Ration keeps that number in your macOS menu bar and turns it orange, then red, the moment you're ahead of pace. It's a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that installs in three commands and shows a section for each provider you use.
 
 <p align="center">
   <picture>
@@ -17,122 +15,157 @@ Your employer hands you a fixed ration of AI requests: GitHub Copilot premium re
   </picture>
 </p>
 
-## What the menu bar tells you
+Copilot premium requests, Codex limits, Claude plan limits, Antigravity quotas: each is a fixed ration, and nothing warns you when you're spending it too fast. Ration is a [SwiftBar](https://github.com/swiftbar/SwiftBar) plugin that keeps your usage in the menu bar and turns it orange, then red, the moment you're ahead of pace.
 
-By default, the bar shows a gauge icon and one number: how much of your busiest quota you've used. Pin a provider, a Codex window, or a Claude account (or all of them side by side) to show that selection instead. Open it for one bar per quota, each with its reset date.
+- **Pace, not just percent.** Every bar marks your fair share for right now.
+- **Four providers, zero API keys.** It reuses the sign-ins you already have.
+- **Every Claude account.** Personal and work side by side, each with its own bars.
+- **Synced across Macs.** Usage from your other laptop shows up through iCloud Drive.
 
-Every bar has a tick (`│`). The tick is your fair share for right now, where usage would sit if you spread it evenly to reset day. Fill behind the tick means you're on pace. Fill past it means you're burning faster than the clock, and the menu bar number warms from green to orange to red. At the worst state the gauge swaps to a warning triangle, so trouble reads without relying on color. Hit 100% and Ration stops pacing and counts down instead: see you on reset day.
-
-Choose **All providers** in **Indicator** to show each provider side by side, with separate Claude accounts. The compact menu bar shows Claude accounts after a sun mark, each as a symbol for its plan class: a person for personal plans, a building for Team and Enterprise. When another account would show the same symbol under a different name, that account shows its name instead. When Codex is the first provider reporting in the view, its mark replaces the gauge and the word "Codex". The dropdown explains the personal and team symbols, and the tooltip identifies each account. Choose **All providers · 5 hours** or **All providers · Weekly** to show the same window across accounts; providers without that window are omitted. The default shows each provider or account’s busiest reported limit. Watching one tool in particular? **Indicator** in the dropdown pins the bar to a single provider. The gauge is then replaced by that product's mark, so the number reads as its own without spelling out a name, and the color follows that provider's pace alone. A tool with more than one limit gets its own section: keep its **Busiest limit**, or pick one limit such as Codex’s 5-hour window or Claude’s weekly limit. With more than one Claude account signed in, a second group picks the busiest account, a single account, or **each account**, which puts every account's quota side by side under its initial (`P 40% · A 62%`; the tooltip spells out the names). The two groups combine, so **each account** with **Weekly** compares every account's weekly limit. The parent menu names your current selection, and a checkmark marks it in the list. The warning triangle still takes the icon slot at the worst state, where it brings the name back with it. The choice is saved in `~/.config/ration/menubar-source`; pick **Busiest quota** to go back to the default.
-
-## Install
-
-### First-time checklist
-
-Before installing, confirm these requirements:
-
-- **App:** macOS, [SwiftBar](https://github.com/swiftbar/SwiftBar) (`brew install --cask swiftbar`), and `jq` (`brew install jq`).
-- **Installer:** `git` is needed for the commands below. Homebrew is optional and only used by the example install commands.
-- **Quota source:** Set up at least one quota source. Providers work independently, so you don't need all four:
-  - **Copilot:** [GitHub CLI](https://cli.github.com/) signed in with `gh auth login` and an active Copilot seat.
-  - **Codex:** a signed-in Codex app or CLI. For the CLI, run `codex login` before using Codex. Offline, Ration needs one completed response to read usage from local sessions.
-  - **Claude:** Claude Code signed in (`/login`) with a Pro, Max, Team, or Enterprise plan.
-  - **Antigravity:** Node.js/npm plus [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage), installed with `npm install -g antigravity-usage` and signed in with `antigravity-usage login`.
-
-Ration doesn't need API keys. It uses each provider's existing local sign-in or session data.
+## Quick start
 
 ```bash
-git clone https://github.com/shkao/ration.git
-cd ration
+brew install --cask swiftbar && brew install jq
+git clone https://github.com/shkao/ration.git && cd ration
 ./install.sh
 ```
 
-Then point SwiftBar at the plugin folder `install.sh` prints (Preferences > Plugins > Plugin Folder). The default is `~/.swiftbar-plugins`; set `SWIFTBAR_PLUGIN_DIR` when running the installer to choose another folder. Coming from QuotaPace? `install.sh` clears the old plugin first, so SwiftBar won't run both.
+Point SwiftBar at the folder `install.sh` prints (**Preferences > Plugins > Plugin Folder**, default `~/.swiftbar-plugins`). Set up at least one provider below; Ration shows a section for each one it finds and setup steps when it finds none.
 
-### Separate Codex and Claude icons
+## Providers
 
-To show Claude as a separate menu bar item with its own logo, install the second
-plugin beside the first and enable the split layout:
+| Provider | You need | Ration reads |
+|---|---|---|
+| **Copilot** | [GitHub CLI](https://cli.github.com/) signed in (`gh auth login`) with a Copilot seat | Monthly premium requests from `gh api /copilot_internal/user` |
+| **Codex** | Codex app or CLI signed in (`codex login`) | 5-hour and weekly limits from ChatGPT's usage endpoint, falling back to local session snapshots |
+| **Claude** | Claude Code signed in (`/login`) on a Pro, Max, Team, or Enterprise plan | 5-hour, weekly, and per-model weekly limits, the numbers `/usage` shows |
+| **Antigravity** | [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) (`npm install -g antigravity-usage`, then `antigravity-usage login`) | Two weekly quotas: Gemini models, and Claude plus GPT models |
 
-```bash
-cp ration-claude.1m.sh ~/.swiftbar-plugins/
-mkdir -p ~/.config/ration
-touch ~/.config/ration/split-indicators
-open -g 'swiftbar://refreshallplugins'
-```
-
-Use the actual plugin folder if it differs from the default. In an All providers
-view, both items follow its selected limit. Other providers remain in the first
-item. Select a different indicator to return to the single-item view.
-
-### Reproducible setup
-
-The checkout contains no account data or machine-specific settings. `install.sh` derives the helper and default plugin paths, and the plugin derives its cache path, from each user's `HOME`; `SWIFTBAR_PLUGIN_DIR` is the only install setting. It copies the plugin and login helper but never copies quota caches or Codex sessions, so every installation reads that user's signed-in providers at runtime.
-
-For the default layout on any account, run the same `./install.sh` command above and select the printed `~/.swiftbar-plugins` folder in SwiftBar. For a managed or shared folder, use the same explicit value on each machine:
-
-```bash
-SWIFTBAR_PLUGIN_DIR="$HOME/path/to/swiftbar-plugins" ./install.sh
-```
-
-## What it tracks
-
-Ration shows a section for each provider you already use, and setup instructions when it finds none. Each provider works independently.
-
-To hide a provider you have set up but don't want to watch, list the ones to keep in `~/.config/ration/providers`, one per line (`copilot`, `codex`, `claude`, `antigravity`). Ration never fetches the rest. Delete the file to show everything again:
+To watch only some of them, list the ones to keep in `~/.config/ration/providers`. Ration never fetches the rest; delete the file to show everything again.
 
 ```bash
 mkdir -p ~/.config/ration && printf 'codex\nclaude\n' > ~/.config/ration/providers
 ```
 
-- **Copilot** needs the [GitHub CLI](https://cli.github.com/) (`gh`) signed in (`gh auth login`) with a Copilot seat. Ration reads your monthly premium-request quota and its reset date.
-- **Codex** needs a signed-in Codex app or CLI. Ration asks `chatgpt.com/backend-api/wham/usage`, the endpoint behind Codex's `/status`, on every refresh with the access token Codex keeps in `~/.codex/auth.json`, so usage from your other machines shows up too. The token goes to curl on stdin and never lands in Ration's cache, and Ration never refreshes it, because that would replace the one Codex holds. When the request fails, Ration falls back to the usage windows in recent session snapshots under `~/.codex`, currently a five-hour and/or weekly limit depending on the account.
-- **Claude** needs Claude Code signed in with a Claude plan. Ration reads the five-hour, weekly, and per-model weekly limits that `/usage` shows, which Claude Code and claude.ai share. It finds every account Claude Code has signed in on this Mac, one per config folder, and shows each with its own bars:
+### More than one Claude account
 
-  ```bash
-  claude                                          # personal account, ~/.claude
-  CLAUDE_CONFIG_DIR=~/.claude-work claude         # then /login with the work account
-  ```
+Ration finds every account Claude Code has signed in on this Mac, one per config folder, with no setup:
 
-  The second account has its own Keychain item, so Ration needs no setup to show it. Team and Enterprise accounts are named by their organization; others read as Personal.
-- **Antigravity** needs the [`antigravity-usage`](https://github.com/skainguyen1412/antigravity-usage) CLI (`npm install -g antigravity-usage`, then a one-time `antigravity-usage login`). Ration finds it on Homebrew's PATH or in an nvm-installed Node; other Node managers aren't searched. It reports two weekly quotas: all Gemini models share one, all Claude and GPT models share the other.
+```bash
+claude                                    # personal account, ~/.claude
+CLAUDE_CONFIG_DIR=~/.claude-work claude   # then /login with the work account
+```
 
-## Why "Ration"
+Team and Enterprise accounts are named by their organization; others read as Personal.
 
-A quota you set yourself is a budget. A quota your company hands you is a ration: someone else decided how much, it never feels like enough, and your job is making it last to the next distribution day.
+## Reading the bars
 
-That's the whole app. The tick is today's fair share. Fill past it is bread eaten early. Reset day is distribution day. And at 100%, Ration stops pretending there's anything left to pace and says what everyone at the back of the queue already knows: see you on reset day.
+```
+5 hours:    [████████░░░│░░░░]  52% used
+Weekly:     [██████████│███░░]  81% used
+```
+
+The tick (`│`) is your fair share by now, where usage would sit if you spread it evenly to reset day.
+
+- **Fill behind the tick:** on pace. The number stays green.
+- **Fill past the tick:** you're borrowing from tomorrow. The number warms to orange, then red, and at the worst state the icon becomes a warning triangle so it doesn't rely on color.
+- **100%:** Ration stops pacing and counts down instead: see you on reset day.
+
+## Choosing what the menu bar shows
+
+By default the menu bar shows a gauge and your busiest quota across every provider. **Indicator** in the dropdown changes that:
+
+| Choice | Menu bar shows |
+|---|---|
+| **Busiest quota** (default) | The highest usage across all providers |
+| **All providers** | Each provider and Claude account side by side, or one window across them (5 hours or Weekly) |
+| A single provider | That provider alone, with its logo in place of the gauge and its own pace color |
+| A single limit | One window, such as Codex's 5 hours or Claude's weekly limit |
+| A Claude account, or **Each account** | One account, or every account by initial (`P 40% · A 62%`) |
+
+Provider and limit choices combine, so **Each account** with **Weekly** compares every account's weekly limit. In the side-by-side views, Claude accounts sit after a sun mark as plan symbols, a person for personal plans and a building for Team and Enterprise; the tooltip names each one. Your choice is saved in `~/.config/ration/menubar-source`.
+
+<details>
+<summary>Separate Codex and Claude icons</summary>
+
+To show Claude as its own menu bar item, install the second plugin and turn on the split layout:
+
+```bash
+cp ration-claude.1m.sh ~/.swiftbar-plugins/
+mkdir -p ~/.config/ration && touch ~/.config/ration/split-indicators
+open -g 'swiftbar://refreshallplugins'
+```
+
+In an **All providers** view, both items follow the selected limit and other providers stay in the first item. Pick any other indicator to go back to one item.
+
+</details>
+
+## Syncing between Macs
+
+Each Mac's Ration writes the Claude and Codex usage it fetched to `iCloud Drive/Ration/`: one small file per account with its fetch time and **never a token**. When this Mac can't fetch an account itself, for example because you only use it on your other laptop, it shows the newer copy, marked "fetched by another Mac".
+
+Install Ration on each Mac and sign them into the same iCloud account. Without iCloud Drive, Ration skips this.
 
 ## How it works
 
-Ration calls `gh api /copilot_internal/user`, the internal endpoint GitHub's own Copilot clients use, and refreshes every minute (the `1m` in `ration.1m.sh`, per SwiftBar's naming). For Codex it asks ChatGPT's usage endpoint and falls back to the newest rate-limit snapshot on disk, including resumed and archived sessions. Each provider shows when its data was fetched or recorded; cached responses keep their original timestamp. Re-run `./install.sh` to replace the old five-minute plugin with the one-minute version. These sources report snapshots, so Ration works out pace locally from each limit's reset time and window length.
+Ration refreshes every minute (the `1m` in `ration.1m.sh`). Each provider shows when its data was fetched, and Ration works out pace locally from each limit's reset time and window length.
 
-For Claude, it reads each account's access token from the macOS Keychain and asks `api.anthropic.com/api/oauth/usage`, the endpoint behind `/usage`, at most once every five minutes per account. The token goes to curl on stdin, so it never shows in a process list, and it never lands in Ration's cache. Ration doesn't refresh an expired token, because that would replace the one Claude Code holds. It keeps the cached numbers with their timestamp and reports that this account's usage token expired or was rejected. This doesn't mean your Claude subscription or other sessions expired. Run `/usage` in Claude Code for the affected account to refresh its credentials; for a custom config directory, use that account's launcher.
+- **Copilot:** calls `gh api /copilot_internal/user`, the endpoint GitHub's own Copilot clients use. When GitHub is unreachable, the menu renders from cache with an offline note and a wifi-slash icon. Ration asks you to sign in only when your token is missing or rejected.
+- **Codex:** asks `chatgpt.com/backend-api/wham/usage`, the endpoint behind Codex's `/status`, with the token in `~/.codex/auth.json`, so usage from other machines counts. If that fails, it reads the newest rate-limit snapshot under `~/.codex`, including resumed and archived sessions.
+- **Claude:** reads each account's token from the macOS Keychain and asks `api.anthropic.com/api/oauth/usage`, the endpoint behind `/usage`, at most once every five minutes per account.
+- **Antigravity:** runs `antigravity-usage --refresh` to bypass the CLI's cache. Ration finds the CLI on Homebrew's PATH or in an nvm-installed Node.
 
-An account you use on another Mac expires on this one, since only a running Claude Code renews its token. So each Mac's Ration also writes the Claude and Codex usage it fetched to `iCloud Drive/Ration/`, one small file per account with its fetch time and no tokens. When this Mac can't fetch an account itself, it shows the newer copy from another Mac, marked "fetched by another Mac". Install Ration on both Macs and sign both into the same iCloud account; without iCloud Drive, Ration skips this.
+Tokens go to curl on stdin, so they never show in a process list or land in Ration's cache. Ration never refreshes a Codex or Claude token, since that would replace the one the app holds. An expired Claude token shows the cached numbers with a note; run `/usage` in that account's Claude Code to renew it. That note doesn't mean your subscription expired.
 
-It requests fresh Antigravity data with `--refresh`, bypassing the CLI's own cache. It caches the last good provider responses at `~/Library/Caches/ration/`. When GitHub is unreachable, the menu renders from that cache with an offline note and a wifi-slash icon instead of an error. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh. Ration asks you to sign in when a previously detected Copilot account has no local token or GitHub rejects that token.
+Good responses are cached in `~/Library/Caches/ration/`. A 15-second watchdog treats a stalled call as a network failure, so a bad connection falls back to the cache instead of hanging the refresh.
 
 ## Caveats
 
-- `/copilot_internal/user` is undocumented and could change without notice.
-- Pace assumes a monthly cycle starting one calendar month before the reset date. That's accurate for standard Copilot business and enterprise billing, but may not match unusual cycles.
-- When the live request fails (offline, or a token Codex hasn't refreshed lately), Codex usage comes from local sessions and updates only after this Mac's Codex receives a response. ChatGPT web-chat model limits aren't stored in Codex sessions and have no supported usage endpoint, so Ration can't show them separately.
-- A Codex, Claude, or Antigravity window whose reset time has passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
-- `/api/oauth/usage` is undocumented and could change without notice. An account you haven't used in Claude Code for a while shows cached numbers until Claude Code refreshes its sign-in, or until another Mac running Ration shares newer ones through iCloud Drive (which can lag a minute or more).
-- The Antigravity section shows percentages only, because its CLI doesn't expose absolute request counts.
+- `/copilot_internal/user`, `/api/oauth/usage`, and the Codex usage endpoint are undocumented and could change without notice.
+- Copilot pace assumes a monthly cycle starting one calendar month before the reset date, which matches standard business and enterprise billing.
+- When Codex's live request fails (offline, or a token Codex hasn't refreshed lately), its usage updates only after this Mac's Codex gets a response. ChatGPT web-chat limits aren't stored anywhere Ration can read.
+- A window whose reset time passed since its last snapshot shows as unused (0%, reset unknown) until fresh data arrives.
+- A Claude account you haven't used here for a while shows cached numbers until Claude Code renews its sign-in, or another Mac shares newer ones (iCloud can lag a minute or more).
+- Antigravity shows percentages only; its CLI doesn't expose request counts.
 
-## Testing
+## Development
 
 ```bash
 ./tests/run.sh
 ```
 
-The suite runs the real plugin end to end against stub Copilot, Antigravity, Keychain, Claude API, and Codex usage API commands plus Codex session fixtures in an isolated `$HOME`. It covers provider combinations, pace escalation, exhausted states, Codex snapshot shapes, every error branch (offline, stalled calls, expired token, no Copilot seat, missing dependencies), concurrent fetches, the cache fallbacks, usage shared between Macs through iCloud Drive, and installation into a custom per-user plugin folder. CI runs it on a macOS runner and ShellCheck on Linux.
+The suite runs the real plugin end to end in an isolated `$HOME`, against stub Copilot, Antigravity, Keychain, Claude API, and Codex usage API commands plus Codex session fixtures. It covers provider combinations, pace escalation, exhausted states, every error branch, concurrent fetches, the cache fallbacks, sharing between Macs, and installing into a custom plugin folder. CI runs it on macOS and ShellCheck on Linux.
+
+<details>
+<summary>Project layout</summary>
+
+```
+ration.1m.sh              the plugin, one self-contained script
+ration-claude.1m.sh       optional second menu bar item
+helpers/ration-login.sh   "Sign in with GitHub…" recovery action
+install.sh                copies the plugin and login helper into place
+tests/run.sh              integration tests
+.github/workflows/ci.yml  ShellCheck on Linux, tests on macOS
+```
+
+SwiftBar runs one file per plugin and treats every executable in its folder as a plugin. So `ration.1m.sh` has no sourced libraries or build step, and the login helper lives in `~/.ration-helpers/`, where it can't fire `gh auth login --web` on every launch.
+
+</details>
+
+<details>
+<summary>Custom install folder</summary>
+
+`install.sh` derives every path from `$HOME` and copies no account data, so each user's install reads their own sign-ins. `SWIFTBAR_PLUGIN_DIR` is the only setting:
+
+```bash
+SWIFTBAR_PLUGIN_DIR="$HOME/path/to/swiftbar-plugins" ./install.sh
+```
+
+It also removes older Ration and QuotaPace plugins, so SwiftBar never runs two.
+
+</details>
 
 ## Uninstall
-
-These commands use the default plugin folder. If you installed into a custom `SWIFTBAR_PLUGIN_DIR`, remove both plugin files there instead.
 
 ```bash
 rm -f ~/.swiftbar-plugins/ration.1m.sh ~/.swiftbar-plugins/ration-claude.1m.sh
@@ -140,21 +173,11 @@ rm -rf ~/.ration-helpers ~/Library/Caches/ration ~/.config/ration
 rm -rf ~/Library/Mobile\ Documents/com~apple~CloudDocs/Ration
 ```
 
-<details>
-<summary>Project layout</summary>
+Use your own folder in the first line if you set `SWIFTBAR_PLUGIN_DIR`.
 
-```
-ration.1m.sh              the main plugin, self-contained
-ration-claude.1m.sh       optional second menu bar item
-helpers/ration-login.sh   "Sign in with GitHub…" recovery action
-install.sh                copies the plugin and login helper into place
-tests/run.sh              integration tests (provider fixtures, isolated $HOME)
-.github/workflows/ci.yml  shellcheck on Linux, tests on macOS
-```
+## Why "Ration"
 
-SwiftBar runs a single file per plugin, so `ration.1m.sh` stays one self-contained script: no sourced libraries, no build step. It also runs every executable in its plugin folder as a plugin, so the login helper lives in `~/.ration-helpers/` instead. Left in the plugin folder, it would fire `gh auth login --web` on every launch.
-
-</details>
+A quota you set yourself is a budget. A quota your company hands you is a ration: someone else decided how much, it never feels like enough, and your job is making it last to distribution day. The tick is today's fair share, fill past it is bread eaten early, and at 100% Ration says what everyone at the back of the queue already knows: see you on reset day.
 
 ## License
 

@@ -20,7 +20,7 @@ SECURITY_BIN="${RATION_SECURITY-$(command -v security)}"
 CURL_BIN="${RATION_CURL-$(command -v curl)}"
 
 
-# Adaptive "light_appearance,dark_appearance" colors — needed because any line
+# Adaptive "light_appearance,dark_appearance" colors, needed because any line
 # using font= drops out of the native menu-item text color and defaults to a
 # low-contrast color unless one is set explicitly.
 SECONDARY_COLOR="#48484a,#aeaeb2"
@@ -35,10 +35,10 @@ BLUE="#0969da,#58a6ff"
 # Each provider's mark as a base64 PNG, black on transparent so SwiftBar's
 # templateImage= tints it for the current appearance. 30px tall tagged 144 DPI:
 # macOS reads the pHYs chunk and lays them out at 15pt, so they sit at menu bar
-# scale while keeping retina pixels — untagged, they render at 30pt and tower
+# scale while keeping retina pixels. Untagged, they render at 30pt and tower
 # over the percentage. Copilot, OpenAI, and Claude come from simple-icons, Antigravity
 # from a threshold of its own app icon, since no icon set carries that mark.
-# Inline because SwiftBar runs one file per plugin — a sidecar image folder
+# Inline because SwiftBar runs one file per plugin, and a sidecar image folder
 # would be picked up as a second plugin.
 LOGO_COPILOT="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAACO0lEQVR4nMWUTWtTQRSGn9yEtKFF2yhNJQYXsS0VJO1KCyWiqAvdFgX1NyiibhTxF4hko6sus6guRNKSSmrtQsQfYNVWW2pBUXsJxZKkSZuM3GF6M/cjtSs9By7nvnPOzHs+ZuB/SaAF3sEoCXoR/OArbynvdcOz5KkiNK0wyZm/B8Z56QjTdZp468Ag91hvGWrpOncJ+uUc4Clj1JjiDUtU6Oc2R4AVHrJIhKOMcoEwz7iMcJ97CcECSQ0Zkaed1JAkCwjGvKRzCM650qhR02kC5xG88AavIOhyYZtsupBuBMveYNPTy7ik7a5wGXPHNLRTIrQ73EbkV88Z2ol42DBAA8FxB/ZKnjzjwFIIGgzokMG4dMyzz0buIFhjDcEtu6H7mZZ+403G/cxLaBHBBgWyTLCMoESaNCUES0yQpcCGbKfl+54+KzTGdzU/3TyRy5bWmWVYbj3MLHWF/uYxXcr+Rk+ALFcUA4tckD6ibPOFopbWAZKEKPKZOtjzlYUte3J1idFp253EHGtC6VbT1IOHqLJKm2rOKlWGfIJFs8/OhoRJcEjavSQIk/JzM/b4vvi+OIbfmFvZ+H6d8twqR17l0GQRJUdG2QEy5Ijaa4bynqLD+g3xQNZ8nquE2U3auCYHqsZ9/aqmmJH7mWRIqzo7w06RwZQ+hZ07oBfiNDe5KMlXeMcnfvFTdryHQU4QARpM8oi5VsQS3GCOsufpK/Ga6xx2Ovs/+iGOMchBWaYiJh/5wPau1fjH8gdqXu5Sxy7o3QAAAABJRU5ErkJggg=="
 LOGO_CODEX="iVBORw0KGgoAAAANSUhEUgAAAB4AAAAeCAQAAACROWYpAAAACXBIWXMAABYlAAAWJQFJUiTwAAADGUlEQVR4nJXVW2jXZRgH8M/mYUu98JQtSy9a6GC01BSiA53sRERkVMTQi8xcFwahjCQCwYuUVkHuqoUYYRkpSQecLoqcTmhDmzmrxcBZEi1DbTn+m9ve+L3+9j/4T7Lnvfg9z/s+3+d9jr+XYipT6wu/GNBjp4f9D6rRKRSsAyquDHqTc4LjVpiFueqcEvRq8IFGL7j28tBJTgi2KcvujLe+wIshjSb/O3iN4KAJWXmpYxHSrl6tNT4yLOg0s9jh1/0pWJrKlXZHYKd787SqHBfsV5rbmqgx2gwGlET3N8kI/lBn3CWXXK1XsCIXV7MgY3tMVUKbY3RvmRalEs/40uqsmacEHWPgjYJTbjZXcCTuNOlVlZ4udiBN1hF3pn7+bcTUhL1expDFsTBj4Hftj98KW43ocLtH/CQY9aE5+FawIFGoj8VRBC5T7y9Bm6vS+9Y6KzjvVV2CmmQzyenjReCTfpax2WsyetJzZnnHSFrvaPKQ4JYicLDbjZG/wS5Bi+rUwMLYvv2uS4QWwX1F4NaC8nxlxAVvmx6lSfYImil1FPfEzQymmRGLM1oAHrHdS2p1ew4DluvzoFtLfYxVsaJ9Vpmi24t5DTpGwxrN069JJU7HFD+RHCRO7EmHYbotLhjVVgD92tb4PTyWZfcL9ibM7FiSwxalqtX2CT4zL0qVPhGKwEuSOU8a/IzymMV2Ta5Blwc8psoxb9ikS40TRWFU4veEqREctcF5wTnrTIzH5bEt+61XrqXo5vcFaxNmgeBQLNUOo4Juj7pNu1HbzI6ql4IXGZa5eDbViDPpzNyhIx2DNktSF+frKQBX+02wYSyCBLAs5UuttE9tnOvE8JuGBA1R+l6w06Dg09ycL48/uYv9k6NxVusTDGowJZo9m/Z1g/E5tVLfxKTNz4Pe7buo+nlaMu4SnLYxK2dpZmz3QTvUedI6rRH4g4fy/GgVvFxUtEiTbYnR5dYreW06IU5ab3T/MlTheY3e0+CkoMfK+FbM8HQMoT+b//+gOQ6m9yeVT9aPFl4ZNKESy+zyqyF9mj2b94pk6R/pgUWJre5IQQAAAABJRU5ErkJggg=="
@@ -709,7 +709,7 @@ codex_settings() { :; }
 codex_present() { [[ "$CODEX_STATE" != "absent" ]]; }
 codex_welcome() {
   echo "For Codex (signed-in local app or CLI): | size=12"
-  echo "Complete one response to create a usage snapshot | size=11 color=${SECONDARY_COLOR}"
+  echo "Sign in, or complete one response, to report usage | size=11 color=${SECONDARY_COLOR}"
 }
 
 # Claude plan limits (Pro, Max, Team, Enterprise): the numbers Claude Code's
@@ -1201,7 +1201,7 @@ print_signin_menu() {
   if [[ -x "$LOGIN_SCRIPT" ]]; then
     extras+=("$(signin_item)" "Opens a one-time code in your browser | size=10 color=${SECONDARY_COLOR}")
   else
-    # install.sh wasn't run, so the login helper isn't available — a dead
+    # install.sh wasn't run, so the login helper isn't available. A dead
     # menu item would be worse than pointing at the terminal command.
     extras+=("Run in a terminal: | size=12" "gh auth login --web | font=Menlo size=11 color=${SECONDARY_COLOR}")
   fi
@@ -1246,7 +1246,7 @@ copilot_fetch() {
     # A watchdog kill leaves no output; give the error screens something to show.
     [[ -z "$RESPONSE" ]] && RESPONSE="gh api gave no response within ${FETCH_TIMEOUT}s"
     if echo "$RESPONSE" | grep -q "HTTP 401"; then
-      # The local token exists but GitHub rejected it — only here is re-login the fix.
+      # The local token exists but GitHub rejected it; only here is re-login the fix.
       CP_STATE="expired"
       return 0
     elif echo "$RESPONSE" | grep -qE "HTTP (403|404)"; then
@@ -1537,7 +1537,7 @@ fi
 
 # A pinned source owns the menu bar alone: naming one tool up there while
 # coloring it by another's pace would be a lie. The dropdown header, computed
-# second, still speaks for every provider — worst pace wins and names its
+# second, still speaks for every provider: worst pace wins and names its
 # quota in text so the alert doesn't rely on color alone.
 compute_header "$MENUBAR_PROVIDER" "$MENUBAR_SELECTOR"
 TITLE_COLOR="$HEADER_COLOR"
@@ -1589,7 +1589,7 @@ if [[ -n "$MENUBAR_PROVIDER" ]]; then
   TITLE_STATUS="${TITLE_STATUS#"$TITLE_NAME"}"
 fi
 
-# Smaller than the native menu bar font size (14) — per user preference.
+# Smaller than the native menu bar font size (14), per user preference.
 TITLE_PARAMS="size=12.5"
 # Surface off-pace states in the menu bar itself via the alert color.
 if [[ "$TITLE_COLOR" == "$RED" || "$TITLE_COLOR" == "$ORANGE" ]]; then
@@ -1602,7 +1602,7 @@ TITLE_ICON="gauge"
 [[ "$TITLE_COLOR" == "$RED" ]] && TITLE_ICON="exclamationmark.triangle"
 [[ -n "$TITLE_OFFLINE_ICON" ]] && TITLE_ICON="$TITLE_OFFLINE_ICON"
 # A pinned provider swaps the generic gauge for its own mark, which says which
-# tool the number belongs to more compactly than its name — so the name drops
+# tool the number belongs to more compactly than its name, so the name drops
 # out of the title. The warning and offline glyphs still win that slot: they
 # carry states the mark can't, and the name comes back to keep them readable.
 TITLE_LABEL="$TITLE_NAME"
