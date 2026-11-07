@@ -629,8 +629,6 @@ expect_contains "96% used"
 
 begin "Codex shares live usage with other Macs and never the token"
 seed_codex_live
-printf '%s\n' '{"tokens":{"access_token":"codex-token","account_id":"acct"}}' \
-  > "$FAKE_HOME/.codex/auth.json"
 run_plugin RATION_SHARE_DIR="$FAKE_HOME/share"
 expect_check "live Codex usage was not shared" test -s "$FAKE_HOME/share/codex-acct"
 expect_check "the shared Codex file holds the token" \

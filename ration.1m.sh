@@ -196,7 +196,7 @@ sanitize_error() {
 
 write_cache() {
   local path="$1" contents="$2" temporary
-  mkdir -p "$CACHE_DIR" 2>/dev/null
+  mkdir -p "${path%/*}" 2>/dev/null
   temporary="$(mktemp "${path}.XXXXXX")" || return 1
   printf '%s\n' "$contents" > "$temporary" 2>/dev/null && mv -f "$temporary" "$path" 2>/dev/null
 }
@@ -210,17 +210,19 @@ SHARE_DIR="${RATION_SHARE_DIR-${HOME}/Library/Mobile Documents/com~apple~CloudDo
 
 # share_write NAME EPOCH PAYLOAD
 share_write() {
-  [[ -n "$SHARE_DIR" && -d "$(dirname "$SHARE_DIR")" ]] || return 0
-  mkdir -p "$SHARE_DIR" 2>/dev/null || return 0
-  local temporary
-  temporary="$(mktemp "${SHARE_DIR}/.$1.XXXXXX")" || return 0
-  printf '%s\n%s\n' "$2" "$3" > "$temporary" 2>/dev/null \
-    && mv -f "$temporary" "${SHARE_DIR}/$1" 2>/dev/null
+  [[ -n "$SHARE_DIR" && -d "${SHARE_DIR%/*}" ]] || return 0
+  write_cache "${SHARE_DIR}/$1" "$2"$'\n'"$3"
 }
 
-# share_read NAME: the epoch on the first line, the payload on the second.
+# share_read NAME: sets SHARED_AT (the epoch on the first line) and SHARED
+# (the payload after it), or fails when there's no well-formed copy.
 share_read() {
-  [[ -n "$SHARE_DIR" && -s "${SHARE_DIR}/$1" ]] && cat "${SHARE_DIR}/$1" 2>/dev/null
+  local contents
+  [[ -n "$SHARE_DIR" && -s "${SHARE_DIR}/$1" ]] || return 1
+  contents="$(cat "${SHARE_DIR}/$1" 2>/dev/null)"
+  [[ "$contents" == *$'\n'* ]] || return 1
+  SHARED_AT="${contents%%$'\n'*}"
+  SHARED="${contents#*$'\n'}"
 }
 
 # Marker is "│" (U+2502), not ASCII "|": a literal pipe would start the
@@ -534,9 +536,9 @@ CODEX_LIVE_CACHE_FILE="${CACHE_DIR}/codex-live.tsv"
 CODEX_LIVE_MIN_INTERVAL=50
 
 # The token travels on curl's stdin, never in argv where `ps` would show it.
-codex_request() {
-  printf 'Authorization: Bearer %s\nChatGPT-Account-Id: %s\n' \
-    "$CODEX_TOKEN" "$CODEX_ACCOUNT" \
+# A function argument stays in this shell; run_with_timeout forks, not execs.
+codex_request() {  # TOKEN ACCOUNT
+  printf 'Authorization: Bearer %s\nChatGPT-Account-Id: %s\n' "$1" "$2" \
     | "$CURL_BIN" -sS -f -H @- -A ration "$CODEX_USAGE_API"
 }
 
@@ -544,7 +546,7 @@ codex_request() {
 # one row in the session snapshot's TSV shape, or nothing when the
 # account-wide numbers aren't available.
 codex_live() {
-  local now mtime=0 response account="" shared
+  local now mtime=0 response token account
   now="$(date +%s)"
   [[ -s "$CODEX_LIVE_CACHE_FILE" ]] && mtime="$(stat -f %m "$CODEX_LIVE_CACHE_FILE" 2>/dev/null)"
   if (( now - mtime < CODEX_LIVE_MIN_INTERVAL )); then
@@ -554,19 +556,17 @@ codex_live() {
   [[ -s "$CODEX_HOME/auth.json" ]] || return 0
   # Process substitution, not a here-string: bash 3.2 backs a here-string
   # with a temp file, and this one would hold the token.
-  IFS=$'\t' read -r CODEX_TOKEN CODEX_ACCOUNT < <("$JQ_BIN" -r \
+  IFS=$'\t' read -r token account < <("$JQ_BIN" -r \
     '.tokens | [(.access_token // "-"), (.account_id // "-")] | @tsv' \
     "$CODEX_HOME/auth.json" 2>/dev/null)
-  [[ "$CODEX_ACCOUNT" != "-" ]] && account="$CODEX_ACCOUNT"
-  CODEX_ACCOUNT="$account"
-  if [[ -n "$CURL_BIN" && -n "$CODEX_TOKEN" && "$CODEX_TOKEN" != "-" ]]; then
-    response="$(run_with_timeout codex_request 2>/dev/null)"
+  [[ "$account" == "-" ]] && account=""
+  if [[ -n "$CURL_BIN" && -n "$token" && "$token" != "-" ]]; then
+    response="$(run_with_timeout codex_request "$token" "$account" 2>/dev/null)"
   fi
-  unset CODEX_TOKEN CODEX_ACCOUNT
+  unset token
   if [[ -z "$response" ]]; then
-    if [[ -n "$account" ]] && shared="$(share_read "codex-${account}")"; then
-      [[ "$shared" == *$'\n'* ]] && printf 'shared\t%s\n' "${shared#*$'\n'}"
-    fi
+    [[ -n "$account" ]] && share_read "codex-${account}" \
+      && printf 'shared\t%s\n' "$SHARED"
     return 0
   fi
   # shellcheck disable=SC2016
@@ -643,13 +643,10 @@ codex_fetch() {
   local now elapsed label slot
   now="$(date +%s)"
   CODEX_ROWS=""
-  for slot in primary secondary; do
+  for slot in "${primary_used}:${primary_window}:${primary_reset}" \
+    "${secondary_used}:${secondary_window}:${secondary_reset}"; do
     local used window reset
-    if [[ "$slot" == "primary" ]]; then
-      used="$primary_used"; window="$primary_window"; reset="$primary_reset"
-    else
-      used="$secondary_used"; window="$secondary_window"; reset="$secondary_reset"
-    fi
+    IFS=: read -r used window reset <<< "$slot"
     [[ -z "$used" || -z "$window" || -z "$reset" ]] && continue
     # A window that reset after the snapshot has no usage yet, and its next
     # reset is unknown until Codex reports again. "null", not empty: tab is
@@ -697,14 +694,14 @@ codex_render() {
   print_quota_rows "$CODEX_ROWS"
   local plan_display="ChatGPT"
   [[ -n "$CODEX_PLAN" ]] && plan_display+=" $(first_letter "$CODEX_PLAN")${CODEX_PLAN:1}"
-  if [[ "$CODEX_SOURCE" == "live" ]]; then
-    echo "${plan_display} · fetched at $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
-  elif [[ "$CODEX_SOURCE" == "shared" ]]; then
-    echo "${plan_display} · fetched by another Mac at $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
-  else
-    echo "${plan_display} · local Codex snapshot from $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
-    echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
-  fi
+  local origin="local Codex snapshot from"
+  case "$CODEX_SOURCE" in
+    live) origin="fetched at" ;;
+    shared) origin="fetched by another Mac at" ;;
+  esac
+  echo "${plan_display} · ${origin} $(stamp "$CODEX_ASOF") | size=11 color=${SECONDARY_COLOR}"
+  [[ "$CODEX_SOURCE" == "local" ]] \
+    && echo "Updates after a Codex response | size=11 color=${SECONDARY_COLOR}"
 }
 
 codex_takeover() { return 1; }
@@ -735,9 +732,8 @@ CLAUDE_API="https://api.anthropic.com/api/oauth"
 CLAUDE_MIN_INTERVAL=300
 
 claude_services() {
-  "$SECURITY_BIN" dump-keychain 2>/dev/null \
-    | sed -n 's/^ *"svce"<blob>="\(Claude Code-credentials\(-[0-9a-f]\{8\}\)\{0,1\}\)"$/\1/p' \
-    | sort -u
+  sed -n 's/^ *"svce"<blob>="\(Claude Code-credentials\(-[0-9a-f]\{8\}\)\{0,1\}\)"$/\1/p' \
+    <<< "$CLAUDE_KEYCHAIN" | sort -u
 }
 
 # One service can hold several items under different accounts: Claude Code
@@ -746,10 +742,10 @@ claude_services() {
 # expires last.
 claude_credentials() {
   local service="$1" accounts account
-  accounts="$("$SECURITY_BIN" dump-keychain 2>/dev/null | awk -v svce="$service" '
+  accounts="$(awk -v svce="$service" '
     /^keychain:/ { acct = "" }
     /^ *"acct"<blob>="/ { acct = $0; sub(/^ *"acct"<blob>="/, "", acct); sub(/"$/, "", acct) }
-    index($0, "\"svce\"<blob>=\"" svce "\"") { print acct }')"
+    index($0, "\"svce\"<blob>=\"" svce "\"") { print acct }' <<< "$CLAUDE_KEYCHAIN")"
   while IFS= read -r account; do
     if [[ -n "$account" ]]; then
       "$SECURITY_BIN" find-generic-password -s "$service" -a "$account" -w 2>/dev/null
@@ -763,9 +759,9 @@ claude_credentials() {
 
 # The token travels on curl's stdin, never in argv where `ps` would show it.
 # Prints the body, then the HTTP status on a line of its own.
-claude_request() {
-  printf 'Authorization: Bearer %s\nanthropic-beta: oauth-2025-04-20\n' "$CLAUDE_TOKEN" \
-    | "$CURL_BIN" -sS -H @- -w '\n%{http_code}' "${CLAUDE_API}/$1"
+claude_request() {  # TOKEN PATH
+  printf 'Authorization: Bearer %s\nanthropic-beta: oauth-2025-04-20\n' "$1" \
+    | "$CURL_BIN" -sS -H @- -w '\n%{http_code}' "${CLAUDE_API}/$2"
 }
 
 # One jq pass over {subscription, tier, profile, usage}: account name, plan,
@@ -805,18 +801,21 @@ claude_share_key() {
 claude_fetch_account() {
   local service="$1" cache creds token expires subscription tier now mtime=0
   local json="" warning="" fetched="" asof="" response status profile parsed
-  local key shared shared_at=""
+  local key shared_at=""
   cache="${CACHE_DIR}/claude${service#Claude Code-credentials}.json"
-  creds="$(claude_credentials "$service")"
-  # Process substitution, not a here-string: bash 3.2 backs a here-string
-  # with a temp file, and this one would hold the token.
-  IFS=$'\t' read -r token expires subscription tier < <(printf '%s' "$creds" \
-    | "$JQ_BIN" -r '.claudeAiOauth | [(.accessToken // "" | if . == "" then "-" else . end), (.expiresAt // 0),
-        (.subscriptionType // "-"), (.rateLimitTier // "-")] | @tsv' 2>/dev/null)
-  [[ "$subscription" == "-" ]] && subscription=""
-  [[ "$tier" == "-" ]] && tier=""
   now="$(date +%s)"
   [[ -s "$cache" ]] && mtime="$(stat -f %m "$cache" 2>/dev/null)"
+  # A fresh cache needs no token, so the Keychain is read only past it.
+  if (( now - mtime >= CLAUDE_MIN_INTERVAL )); then
+    creds="$(claude_credentials "$service")"
+    # Process substitution, not a here-string: bash 3.2 backs a here-string
+    # with a temp file, and this one would hold the token.
+    IFS=$'\t' read -r token expires subscription tier < <(printf '%s' "$creds" \
+      | "$JQ_BIN" -r '.claudeAiOauth | [(.accessToken // "" | if . == "" then "-" else . end), (.expiresAt // 0),
+          (.subscriptionType // "-"), (.rateLimitTier // "-")] | @tsv' 2>/dev/null)
+    [[ "$subscription" == "-" ]] && subscription=""
+    [[ "$tier" == "-" ]] && tier=""
+  fi
 
   if (( now - mtime < CLAUDE_MIN_INTERVAL )); then
     json="$(cat "$cache")"
@@ -830,11 +829,10 @@ claude_fetch_account() {
     # "cached from" note says enough.
     [[ -s "$cache" ]] || warning="Usage token expired · run /usage in this account's Claude Code"
   else
-    CLAUDE_TOKEN="$token"
-    response="$(run_with_timeout claude_request usage 2>/dev/null)"
+    response="$(run_with_timeout claude_request "$token" usage 2>/dev/null)"
     status="${response##*$'\n'}"
     if [[ "$status" == "200" ]]; then
-      profile="$(run_with_timeout claude_request profile 2>/dev/null)"
+      profile="$(run_with_timeout claude_request "$token" profile 2>/dev/null)"
       if [[ "${profile##*$'\n'}" == "200" ]]; then
         profile="${profile%$'\n'*}"
       else
@@ -860,19 +858,18 @@ claude_fetch_account() {
     else
       warning="Claude usage API is unreachable"
     fi
-    unset CLAUDE_TOKEN
   fi
+  unset token creds
 
   if [[ -z "$json" && -s "$cache" ]]; then
     json="$(cat "$cache")"
     asof="$(stamp "$mtime")"
     # Another Mac that uses this account may have fetched it since.
     key="$(claude_share_key <<< "$json")"
-    if [[ -n "$key" ]] && shared="$(share_read "claude-${key}")" \
-      && [[ "$shared" == *$'\n'* ]] && (( ${shared%%$'\n'*} > mtime )); then
-      json="${shared#*$'\n'}"
+    if [[ -n "$key" ]] && share_read "claude-${key}" && (( SHARED_AT > mtime )); then
+      json="$SHARED"
       asof=""
-      shared_at="${shared%%$'\n'*}"
+      shared_at="$SHARED_AT"
       # The account's numbers are current, so this Mac's token doesn't matter.
       [[ "$warning" == "Signed out"* ]] || warning=""
     fi
@@ -904,6 +901,8 @@ claude_fetch_account() {
 claude_fetch() {
   [[ -z "$SECURITY_BIN" || -z "$CURL_BIN" ]] && return 0
   local services service
+  # Item attributes only, no secrets: dumped once for every account.
+  CLAUDE_KEYCHAIN="$("$SECURITY_BIN" dump-keychain 2>/dev/null)"
   services="$(claude_services)"
   while IFS= read -r service; do
     [[ -n "$service" ]] && claude_fetch_account "$service"
@@ -1242,10 +1241,10 @@ copilot_fetch() {
     gh_err="$(cat "$err_file")"
     rm -f "$err_file"
   fi
-  [[ $api_exit -ne 0 ]] && RESPONSE="${gh_err}${gh_err:+${RESPONSE:+ }}${RESPONSE}"
-  # A watchdog kill leaves no output; give the error screens something to show.
-  [[ $api_exit -ne 0 && -z "$RESPONSE" ]] && RESPONSE="gh api gave no response within ${FETCH_TIMEOUT}s"
   if [[ $api_exit -ne 0 ]]; then
+    RESPONSE="${gh_err}${gh_err:+${RESPONSE:+ }}${RESPONSE}"
+    # A watchdog kill leaves no output; give the error screens something to show.
+    [[ -z "$RESPONSE" ]] && RESPONSE="gh api gave no response within ${FETCH_TIMEOUT}s"
     if echo "$RESPONSE" | grep -q "HTTP 401"; then
       # The local token exists but GitHub rejected it — only here is re-login the fix.
       CP_STATE="expired"
@@ -1637,11 +1636,9 @@ echo "---"
 echo "Ration | size=13"
 echo "● ${HEADER_STATUS} | color=${HEADER_COLOR} size=11"
 if [[ "$MENUBAR_SOURCE" == all* && -z "$MENUBAR_PROVIDER" ]] && claude_has_data; then
-  if [[ -n "$SPLIT_ROLE" ]]; then
-    echo "Claude: :person.crop.circle: Personal · :building.2.crop.circle: Team/Enterprise | size=11 color=${SECONDARY_COLOR}"
-  else
-    echo ":sun.max.fill: Claude: :person.crop.circle: Personal · :building.2.crop.circle: Team/Enterprise | size=11 color=${SECONDARY_COLOR}"
-  fi
+  legend_prefix=":sun.max.fill: "
+  [[ -n "$SPLIT_ROLE" ]] && legend_prefix=""
+  echo "${legend_prefix}Claude: :person.crop.circle: Personal · :building.2.crop.circle: Team/Enterprise | size=11 color=${SECONDARY_COLOR}"
 fi
 for provider in "${PROVIDERS[@]}"; do
   provider_call "$provider" render
