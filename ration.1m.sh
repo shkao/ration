@@ -776,17 +776,23 @@ claude_request() {  # TOKEN PATH
 }
 
 # One jq pass over {subscription, tier, profile, usage}: account name, plan,
-# and email on the first three lines, then one TSV row per limit. Windows are
+# and email on the first three lines, then one TSV row per limit. The plan
+# comes from the profile when it has one: the Keychain keeps the plan from
+# login, so it still says Max after a downgrade to Pro. Windows are
 # fixed (5 hours, 7 days), so elapsed comes from the reset time. A window
 # without a reset reads as unused; a past reset has unavailable usage.
 parse_claude() {
   # shellcheck disable=SC2016
   "$JQ_BIN" -r '
     def epoch: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
-    (if .subscription == "team" or .subscription == "enterprise"
-     then .profile.organization.name // "Team" else "Personal" end),
-    ((.subscription // "" | if . == "" then "Claude" else (.[:1] | ascii_upcase) + .[1:] end)
-     + ((.tier // "" | capture("_(?<n>[0-9]+x)$") | " " + .n) // "")),
+    (.profile.organization // {}) as $org
+    | (if ($org.organization_type // "") != ""
+       then [($org.organization_type | ltrimstr("claude_")), ($org.rate_limit_tier // "")]
+       else [(.subscription // ""), (.tier // "")] end) as [$plan, $tier]
+    | (if $plan == "team" or $plan == "enterprise"
+     then $org.name // "Team" else "Personal" end),
+    (($plan | if . == "" then "Claude" else (.[:1] | ascii_upcase) + .[1:] end)
+     + (($tier | capture("_(?<n>[0-9]+x)$") | " " + .n) // "")),
     (.profile.account.email // ""),
     ([["5 hours", .usage.five_hour.utilization, .usage.five_hour.resets_at, 18000],
       ["Weekly", .usage.seven_day.utilization, .usage.seven_day.resets_at, 604800]]

@@ -762,6 +762,15 @@ expect_contains "● Claude Acme Corp 5 hours burning fast"
 # The title follows the busiest quota across both accounts.
 expect_contains "95% | size=12.5"
 
+begin "claude takes the plan from the profile over a stale Keychain one"
+seed_personal_claude
+"$JQ" '.organization += {organization_type: "claude_pro", rate_limit_tier: "default_claude_ai"}' \
+  <(claude_profile_json me@example.com "Octo Cat") \
+  | { cat; echo 200; } > "$FAKE_HOME/claude-api/tok-personal/profile"
+run_plugin
+expect_contains "Personal · Pro | size=12"
+expect_not_contains "Max 5x"
+
 begin "claude ignores Keychain items that aren't Claude Code sign-ins"
 seed_personal_claude
 mkdir -p "$FAKE_HOME/keychain"
